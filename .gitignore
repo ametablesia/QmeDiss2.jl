@@ -1,0 +1,4 @@
+# Julia build artifacts
+*.so
+*.dylib
+*.dll

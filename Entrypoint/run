@@ -1,0 +1,1 @@
+julia -J .\package_sysimage.so -t 8 --compile=min .\Launcher.jl
