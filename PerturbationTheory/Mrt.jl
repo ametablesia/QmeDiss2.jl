@@ -22,10 +22,11 @@ mutable struct Patternized_g{T}
 end
 
 mutable struct Patternized_g′{T}
+    ααββ::Array{T,3}   # (t, α, β)
     αβββ::Array{T,3}   # (t, α, β)
     αβαα::Array{T,3}   # (t, α, β)
     function Patternized_g′{T}(n_sys::Int, n_itr::Int) where {T}
-        new(zeros(T, n_itr, n_sys, n_sys), zeros(T, n_itr, n_sys, n_sys))
+        new(zeros(T, n_itr, n_sys, n_sys), zeros(T, n_itr, n_sys, n_sys), zeros(T, n_itr, n_sys, n_sys))
     end
 end
 
@@ -62,13 +63,15 @@ end
     error("unsupported g pattern")
 
 @inline Base.getindex(g′::Patternized_g′{T}, t::Int,a::Int,b::Int,c::Int,d::Int) where {T} =
-    b==c && c==d ? g′.αβββ[t,a,b] :
-    a==c && c==d ? g′.αβαα[t,a,b] :
+    a==b && c==d            ? g′.ααββ[t,a,c] :
+    b==c && c==d            ? g′.αβββ[t,a,b] :
+    a==c && c==d            ? g′.αβαα[t,a,b] :
     error("unsupported g′ pattern")
 
 @inline Base.setindex!(g′::Patternized_g′{T}, v, t::Int,a::Int,b::Int,c::Int,d::Int) where {T} =
-    b==c && c==d ? (g′.αβββ[t,a,b]=v) :
-    a==c && c==d ? (g′.αβαα[t,a,b]=v) :
+    a==b && c==d            ? (g′.ααββ[t,a,c]=v) :
+    b==c && c==d            ? (g′.αβββ[t,a,b]=v) :
+    a==c && c==d            ? (g′.αβαα[t,a,b]=v) :
     error("unsupported g′ pattern")
 
 @inline Base.getindex(g″::Patternized_g″{T}, t::Int,a::Int,b::Int,c::Int,d::Int) where {T} =
@@ -87,6 +90,7 @@ end
     return dest
 end
 @inline function inplace_add!(dest::Patternized_g′{T}, src::Patternized_g′{T}) where {T}
+    dest.ααββ .+= src.ααββ 
     dest.αβββ .+= src.αβββ
     dest.αβαα .+= src.αβαα
     return dest
@@ -111,9 +115,11 @@ mutable struct MrtContext
     g′                  ::Patternized_g′{ComplexF64}
     g″                  ::Patternized_g″{ComplexF64}
     Λ                   ::Patternized_Λ{Float64}
+    Γ                   ::Array{ComplexF64, 2}
 
     # output
     transition_rate     ::Array{Float64, 2}
+    dissipation         ::Array{Dissipation, 1}
 
 
     function MrtContext(system::System, environment::Environment, simulation_details::SimulationDetails)
@@ -131,10 +137,12 @@ mutable struct MrtContext
         g′      = Patternized_g′{ComplexF64}(n_sys, n_itr)
         g″      = Patternized_g″{ComplexF64}(n_sys, n_itr)
         Λ       = Patternized_Λ{Float64}(n_sys)
+        Γ       = zeros(ComplexF64, (n_sys, n_sys))
 
         transition_rate     = zeros(Float64, (n_sys, n_sys))
+        dissipation         = [Dissipation(i, n_sys) for i in 1:n_osc]
 
-        new(system, environment, simulation_details, γ_exci, ϵ_exci, ϵ_exci_0, U_sys, g, g′, g″, Λ, transition_rate)
+        new(system, environment, simulation_details, γ_exci, ϵ_exci, ϵ_exci_0, U_sys, g, g′, g″, Λ, Γ, transition_rate, dissipation)
     end
 end
 
@@ -146,6 +154,7 @@ function create__mrt_context(
     return MrtContext(system, environment, simulation_details)
 end
 
+# Equation 65
 function calc__Λ!(context::MrtContext)
 
     n_sys       = context.system.n_sys
@@ -195,6 +204,26 @@ function calc__Λ!(context::MrtContext)
     end
 end
 
+# Equation 65
+function calc__Γ!(context::MrtContext)
+    
+    n_sys       = context.system.n_sys
+    n_osc       = context.environment.num_of_effective_oscillators
+    γ_exci      = context.γ_exci    
+    Γ           = context.Γ
+
+    for β in 1:n_sys, α in 1:n_sys
+
+        Γ_αβ = 0.0im
+        for osc_idx in 1:n_osc
+            Γ_αβ += 0
+            # Γ_αβ += γ_exci[osc_idx,α,β]
+        end
+
+        Γ[α,β] = Γ_αβ
+    end
+end
+
 function calc__g_g′_and_g″!(context::MrtContext)
     n_sys   = context.system.n_sys
     n_osc   = context.environment.num_of_effective_oscillators
@@ -220,26 +249,28 @@ function calc__g_g′_and_g″!(context::MrtContext)
 
         @inbounds for β in 1:n_sys, α in 1:n_sys
 
-            hr_ααββ         = γ_exci[osc_idx,α,α] * γ_exci[osc_idx,β,β]
-            hr_αβαβ_ω²      = γ_exci[osc_idx,α,β] * γ_exci[osc_idx,α,β] * (ω^2)
-            hr_αβββ_ω       = γ_exci[osc_idx,α,β] * γ_exci[osc_idx,β,β] * ω
+            γʲ_ααββ         = γ_exci[osc_idx,α,α] * γ_exci[osc_idx,β,β]
+            ω²_γʲ_αβαβ      = γ_exci[osc_idx,α,β] * γ_exci[osc_idx,α,β] * (ω^2)
+            ω_γʲ_αβββ       = γ_exci[osc_idx,α,β] * γ_exci[osc_idx,β,β] * ω
+            ω_γʲ_ααββ       = γ_exci[osc_idx,α,α] * γ_exci[osc_idx,β,β] * ω
 
             @inbounds for time_idx = 1:n_itr
                 t   = (time_idx - 1) * Δt
                 ωt  = ω * t
-
-                sin_ωt, cos_ωt = sin(ωt), cos(ωt)
+                sin_ωt, cos_ωt = sincos(ωt)
                 
-                g[time_idx,α,α,β,β]    += (hr_ααββ      * ((coth * (1.0 - cos_ωt)) + 1.0im*(sin_ωt - ωt)))
+                g[time_idx,α,α,β,β]         += (γʲ_ααββ      * ((coth * (1.0 - cos_ωt)) + 1.0im*(sin_ωt - ωt)))
 
+                # 같을 때만 따로 처리... 
                 if α == β
-                    g′[time_idx,α,α,α,α]    += hr_αβββ_ω    * ((coth * sin_ωt) + 1.0im*(cos_ωt - 1.0))
+                    g′[time_idx,α,α,α,α]    += ω_γʲ_αβββ    * ((coth * sin_ωt) + 1.0im*(cos_ωt - 1.0))
                 else
-                    g′[time_idx,α,β,β,β]    += hr_αβββ_ω    * ((coth * sin_ωt) + 1.0im*(cos_ωt - 1.0))
-                    g′[time_idx,β,α,β,β]    += hr_αβββ_ω    * ((coth * sin_ωt) + 1.0im*(cos_ωt - 1.0)) 
+                    g′[time_idx,α,α,β,β]    += ω_γʲ_ααββ    * ((coth * sin_ωt) + 1.0im*(cos_ωt - 1.0))
+                    g′[time_idx,α,β,β,β]    += ω_γʲ_αβββ    * ((coth * sin_ωt) + 1.0im*(cos_ωt - 1.0))
+                    g′[time_idx,β,α,β,β]    += ω_γʲ_αβββ    * ((coth * sin_ωt) + 1.0im*(cos_ωt - 1.0)) 
                 end
            
-                g″[time_idx,α,β,β,α]    += hr_αβαβ_ω²   * ((coth * cos_ωt) - 1.0im*(sin_ωt))
+                g″[time_idx,α,β,β,α]    += ω²_γʲ_αβαβ   * ((coth * cos_ωt) - 1.0im*(sin_ωt))
             end
         end
 
@@ -276,6 +307,7 @@ function calc__g_g′_and_g″_with_threads!(context::MrtContext)
     for tid in 1:n_ths
         fill!(g_locals[tid].ααββ, 0)
         
+        fill!(g′_locals[tid].ααββ, 0)
         fill!(g′_locals[tid].αβαα, 0)
         fill!(g′_locals[tid].αβββ, 0)
 
@@ -298,6 +330,7 @@ function calc__g_g′_and_g″_with_threads!(context::MrtContext)
             hr_ααββ         = γ_exci[osc_idx,α,α] * γ_exci[osc_idx,β,β]
             hr_αβαβ_ω²      = γ_exci[osc_idx,α,β] * γ_exci[osc_idx,α,β] * (ω^2)
             hr_αβββ_ω       = γ_exci[osc_idx,α,β] * γ_exci[osc_idx,β,β] * ω
+            ω_γʲ_ααββ       = γ_exci[osc_idx,α,α] * γ_exci[osc_idx,β,β] * ω
 
             @inbounds for time_idx = 1:n_itr
                 t   = (time_idx - 1) * Δt
@@ -310,6 +343,7 @@ function calc__g_g′_and_g″_with_threads!(context::MrtContext)
                 if α == β
                     g′_local[time_idx,α,α,α,α]    += hr_αβββ_ω    * ((coth * sin_ωt) + 1.0im*(cos_ωt - 1.0))
                 else
+                    g′_local[time_idx,α,α,β,β]    += ω_γʲ_ααββ    * ((coth * sin_ωt) + 1.0im*(cos_ωt - 1.0))
                     g′_local[time_idx,α,β,β,β]    += hr_αβββ_ω    * ((coth * sin_ωt) + 1.0im*(cos_ωt - 1.0))
                     g′_local[time_idx,β,α,β,β]    += hr_αβββ_ω    * ((coth * sin_ωt) + 1.0im*(cos_ωt - 1.0)) 
                 end
@@ -348,12 +382,15 @@ function calc__rates!(context::MrtContext)
     ϵ_exci_0    = context.ϵ_exci_0
 
     rate        = context.transition_rate
-
+    
     @inbounds for β in 1:n_sys, α in 1:n_sys
         if α == β; continue; end
 
         ϵ_α0 = ϵ_exci_0[α]
         ϵ_β0 = ϵ_exci_0[β]
+
+        Λ_αααα,  Λ_ααββ,  Λ_ββββ  = Λ[α,α,α,α], Λ[α,α,β,β], Λ[β,β,β,β]
+        Λ_αβαα,  Λ_βααα           = Λ[α,β,α,α], Λ[β,α,α,α]
 
         integral = 0.0
         @inbounds for time_idx in 1:n_itr
@@ -363,9 +400,6 @@ function calc__rates!(context::MrtContext)
             g′_αβββ, g′_αβαα          = g′[time_idx, α,β,β,β], g′[time_idx, α,β,α,α]
             g′_βαββ, g′_βααα          = g′[time_idx, β,α,β,β], g′[time_idx, β,α,α,α]
             g″_αββα                   = g″[time_idx, α,β,β,α]
-
-            Λ_αααα,  Λ_ααββ,  Λ_ββββ  = Λ[α,α,α,α], Λ[α,α,β,β], Λ[β,β,β,β]
-            Λ_αβαα,  Λ_βααα           = Λ[α,β,α,α], Λ[β,α,α,α]
 
             # Equation 72
             exponent = -1.0im*t*(ϵ_β0 - ϵ_α0) - (g_αααα - 2.0*g_ααββ + g_ββββ) - 1.0im*t*(Λ_αααα - 2.0*Λ_ααββ + Λ_ββββ)
@@ -391,3 +425,185 @@ function calc__rates!(context::MrtContext)
     @printf(stderr, "\n")
 end
 
+function calc__dissipations!(context::MrtContext)
+
+    n_sys       = context.system.n_sys
+    n_osc       = context.environment.num_of_effective_oscillators
+    oscs        = context.environment.effective_oscillators
+
+    dissipation = context.dissipation
+
+    n_itr       = context.simulation_details.num_of_iteration
+    Δt          = context.simulation_details.Δt
+
+    γ_exci     = context.γ_exci
+    ϵ_exci      = context.ϵ_exci
+    Λ           = context.Λ
+    Γ           = context.Γ
+    g           = context.g
+    g′          = context.g′
+    g″          = context.g″
+
+    @printf(stderr, "---- Calculating MRT dissipation parameters ----\n")
+
+    @inbounds for β in 1:n_sys, α in 1:n_sys
+
+        if β == α continue end
+
+        ϵ_α = ϵ_exci[α]
+        ϵ_β = ϵ_exci[β]
+
+        Λ_αααα,  Λ_ααββ, Λ_ββββ     = Λ[α,α,α,α], Λ[α,α,β,β], Λ[β,β,β,β]
+        Λ_αβαα,  Λ_βααα             = Λ[α,β,α,α], Λ[β,α,α,α]
+    
+        # 이것도 마찬가지 에너지 shift 합이지. exciton coupling gamma의 합이 아님
+        Γ_αα, Γ_αβ, Γ_βα, Γ_ββ      = Γ[α,α], Γ[α,β], Γ[β,α], Γ[β,β]
+        Γ_αα, Γ_αβ, Γ_βα, Γ_ββ      = 0.0, 0.0, 0.0, 0.0
+
+        @inbounds for osc_idx in 1:n_osc
+
+            ω       = oscs[osc_idx].freq
+            coth    = oscs[osc_idx].coth
+            spreadʲ  = oscs[osc_idx].spread
+            γʲ_exci  = @views γ_exci[osc_idx,:,:]
+
+            # λʲ 까지 객체로 저장하면, 메모리 낭비 심하니.. iteration에서 바로 계산.
+            γʲ_αα, γʲ_αβ, γʲ_βα, γʲ_ββ  = γʲ_exci[α,α], γʲ_exci[α,β], γʲ_exci[β,α], γʲ_exci[β,β]
+
+            λʲ_αααα, λʲ_ββββ            = ω * γʲ_αα * γʲ_αα, ω * γʲ_ββ * γʲ_ββ
+            λʲ_ααββ, λʲ_αββα            = ω * γʲ_αα * γʲ_ββ, ω * γʲ_αβ * γʲ_βα
+            λʲ_βαββ, λʲ_βααα            = ω * γʲ_βα * γʲ_ββ, ω * γʲ_βα * γʲ_αα
+            λʲ_αβββ, λʲ_αβαα            = ω * γʲ_αβ * γʲ_ββ, ω * γʲ_αβ * γʲ_αα
+
+            # 착각했어 γʲ_αα, γʲ_αβ, γʲ_βα, γʲ_ββ 는 에너지 shift이지,. exciton coupling gamma가 아님!!!
+            # 아마 ω dʲ_αα/ √2 였어야 하는건데.
+            γʲ_αα, γʲ_αβ, γʲ_βα, γʲ_ββ  = 0.0, 0.0, 0.0, 0.0
+
+            integral = 0.0
+            for time_idx in 1:n_itr
+
+                g_αααα, g_ααββ, g_ββββ    = g[time_idx, α,α,α,α], g[time_idx, α,α,β,β], g[time_idx, β,β,β,β]
+
+                g′_αααα, g′_ααββ, g′_ββββ = g′[time_idx, α,α,α,α], g′[time_idx, α,α,β,β], g′[time_idx, β,β,β,β]
+                g′_αβββ, g′_αβαα          = g′[time_idx, α,β,β,β], g′[time_idx, α,β,α,α]
+                g′_βαββ, g′_βααα          = g′[time_idx, β,α,β,β], g′[time_idx, β,α,α,α]
+                g″_αββα                   = g″[time_idx, α,β,β,α]
+
+                t   = Δt * (time_idx - 1)
+                ωt  = ω*t
+
+                sin_ωt, cos_ωt = sincos(ωt)
+
+                # Equation 62, f
+                f′ = (coth * sin_ωt)            + 1.0im*(cos_ωt - 1)
+                f″ = (coth * cos_ωt * ω)        + 1.0im*(-sin_ωt * ω)
+                f‴ = (coth * (-sin_ωt) * ω^2)   + 1.0im*(-cos_ωt * ω^2)
+
+                # Equation 60, 61
+                Gʲ_βα   = (λʲ_αααα - 2.0*λʲ_ααββ + λʲ_ββββ)
+                Δʲ_βα   = (λʲ_αααα - λʲ_ββββ) - (γʲ_αα - γʲ_ββ)
+                # Equation 64
+                W_βα    = -1.0im*(g′_αβββ - g′_αβαα) - 2.0*Λ_αβαα + Γ_αβ                
+                X_βα    = -1.0im*(g′_βαββ - g′_βααα) - 2.0*Λ_βααα + Γ_βα    
+                Π_βα    = exp(-1.0im*t*(2.0*Λ_αααα - 2.0*Λ_ααββ - Γ_αα + Γ_ββ) - g′_αααα + 2.0*g′_ααββ - g′_ββββ)
+                # Equation 69
+                # 𝒩_βα
+                S_βα    = ( -(g′_αβββ - g′_αβαα - 2.0im*Λ_αβαα) * (g′_βαββ - g′_βααα - 2.0im*Λ_βααα) + g″_αββα ) * exp(-2.0im*t*(Λ_αααα-Λ_ααββ) - (g_αααα -2.0*g_ααββ + g_ββββ))
+
+                # Equation 76
+                Jʲ_βα   = 
+                    (Δʲ_βα + Gʲ_βα - 1.0im * Gʲ_βα * f′) * S_βα + 
+                    (
+                        (λʲ_βαββ - λʲ_βααα) * f″ * W_βα + 
+                        (λʲ_αβββ - λʲ_αβαα) * f″ * X_βα +
+                        1.0im * λʲ_αββα * f‴ 
+                    ) * Π_βα
+
+                exponent = -1.0im*t*(ϵ_β - ϵ_α)
+
+                trapezoidal_weight  = (time_idx == 1 || time_idx == n_itr) ? 0.5 : 1.0
+                integrand           = Jʲ_βα * exp(exponent)
+                # 𝒥ʲ_βα =
+
+                # Equation 36
+                integral += trapezoidal_weight * real(integrand)
+                @printf(stderr, "%15.6f \n", integral)
+                # @printf(stderr, "%15.6f \n", real(integrand))
+            end
+
+            dissipation[osc_idx].k_dissipation[α,β]   = 2.0 * Δt * integral
+            # dissipation.i_dissipation   = dissipation.k_dissipation / γ_exci
+            dissipation[osc_idx].j_dissipation[α,β]   = dissipation[osc_idx].k_dissipation[α,β] / spreadʲ
+
+            
+
+            if osc_idx % 100 == 0
+                @printf(stderr, "%3d -> %3d    OSC %6d / %6d\n", α, β, osc_idx, n_osc)
+            end
+        end
+
+    end
+end
+
+function check__physics(context::MrtContext)
+
+    n_sys       = context.system.n_sys
+    n_osc       = context.environment.num_of_effective_oscillators
+    oscs        = context.environment.effective_oscillators
+
+    transition_rate = context.transition_rate
+    dissipation     = context.dissipation
+    ϵ_exci_0        = context.ϵ_exci_0
+
+    # temporary T for termperature 
+    T           = oscs[1].temperature
+
+
+    @printf(stderr, "Detailed Balance for Dissipation\n")
+
+    for β in 1:n_sys, α in 1:(β-1)
+
+        for osc_idx in 1:n_osc
+
+            ω               = oscs[osc_idx].freq
+            j_dissipation   = dissipation[osc_idx].j_dissipation
+
+            diss_ratio      = -j_dissipation[α,β] / j_dissipation[β,α]
+            boltz_ratio     = exp(-(ϵ_exci_0[α] - ϵ_exci_0[β]) / T)
+
+            @printf(stderr,
+                "%3d -> %3d, OSC %5d   freq %13.6le   diss_ratio %13.6le   Boltzmann_ratio %13.6le\n",
+                α, β, osc_idx, ω, diss_ratio, boltz_ratio
+            )
+        end
+    end
+    
+
+    @printf(stderr, "Energy Conservation\n")
+
+    for β in 1:n_sys, α in 1:(β-1)
+
+        Edec_elec_αβ = -(ϵ_exci_0[α] - ϵ_exci_0[β]) * transition_rate[α,β]  # C: rate[i + nsys*j]
+        Edec_elec_βα = -(ϵ_exci_0[β] - ϵ_exci_0[α]) * transition_rate[β,α]  # C: rate[j + nsys*i]
+
+        Einc_diss_αβ = 0.0
+        Einc_diss_βα = 0.0
+
+        for osc_idx in 1:n_osc
+
+            k_dissipation   = dissipation[osc_idx].k_dissipation
+
+            Einc_diss_αβ += k_dissipation[α,β]
+            Einc_diss_βα += k_dissipation[β,α]
+        end
+
+        @printf(stderr, "%2d -> %2d  Elec %13.6le  Diss %13.6le\n", α, β, Edec_elec_βα, Einc_diss_βα)
+        @printf(stderr, "%2d -> %2d  Elec %13.6le  Diss %13.6le\n", β, α, Edec_elec_αβ, Einc_diss_αβ)
+    end
+
+    return nothing
+end
+
+function calc__cmrt!(context::MrtContext)
+
+end

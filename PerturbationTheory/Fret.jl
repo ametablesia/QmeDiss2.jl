@@ -167,10 +167,11 @@ function calc__g_with_threads!(context::FretContext)
             common = γ[a,a] * γ[b,b]
             
             @inbounds for time_idx = 1:n_itr
-                t = Δt * (time_idx-1)
-                ωt = ω * t
+                t               = Δt * (time_idx-1)
+                ωt              = ω*t
+                sin_ωt, cos_ωt  = sincos(ωt)
 
-                g_local[time_idx,a,b] += common * ( (coth * (1.0 - cos(ωt))) + 1.0im*(sin(ωt) - ωt) )
+                g_local[time_idx,a,b] += common * ( (coth * (1.0 - cos_ωt)) + 1.0im*(sin_ωt - ωt) )
             end
         end
 
@@ -216,11 +217,13 @@ function calc__g′_and_g″!(context::FretContext)
             
             @inbounds for time_idx in 1:n_itr
 
-                t = Δt * (time_idx-1)
-                ωt = ω * t
+                t               = Δt * (time_idx-1)
+                ωt              = ω*t
+                ω²              = ω*ω
+                sin_ωt, cos_ωt  = sincos(ωt)
                 
-                g′[time_idx,a,b]   += common * ( (ω * coth * sin(ωt)) + 1.0im*(ω * (cos(ωt) - 1.0)) )
-                g″[time_idx,a,b]   += common * ( (ω*ω * coth * cos(ωt)) + 1.0im*(-ω*ω * sin(ωt)) )
+                g′[time_idx,a,b]   += common * ( (ω * coth * sin_ωt)    + 1.0im*(ω * (cos_ωt - 1.0))    )
+                g″[time_idx,a,b]   += common * ( (ω² * coth * cos_ωt)   + 1.0im*(-ω² * sin_ωt)          )
 
             end
         end
@@ -362,3 +365,16 @@ end
 
 # 대각 계산 해야하는데 b+1:n_sys로 되어 있어서 대각은 계산이 안되는 버그가 있엇음
 # b:n_sys로 바꿔놓음.
+
+
+# FILE IO를 어떻게 할것인지?
+using HDF5
+
+function io_to(
+    file_name   ::String,
+    g           ::Bool,
+    g′          ::Bool,
+    g″          ::Bool
+)
+    return 0
+end

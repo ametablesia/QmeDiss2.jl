@@ -87,6 +87,7 @@ function test__mrt()
     )
 
     calc__Λ!(mrt_ctx)
+    calc__Γ!(mrt_ctx)
 
     if Threads.nthreads() == 1
         calc__g_g′_and_g″!(mrt_ctx)
@@ -95,6 +96,9 @@ function test__mrt()
     end
 
     calc__rates!(mrt_ctx)
+    calc__dissipations!(mrt_ctx)
+
+    check__physics(mrt_ctx)
 end
 
 
@@ -102,5 +106,5 @@ BenchmarkTools.DEFAULT_PARAMETERS.samples = 10
 # @btime test__fret()
 # @btime test__mrt()
 
-test__fret()
-# test__mrt()
+# test__fret()
+test__mrt()
