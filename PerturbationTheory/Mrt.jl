@@ -481,7 +481,7 @@ function calc__dissipations!(context::MrtContext)
             γʲ_αα, γʲ_αβ, γʲ_βα, γʲ_ββ  = 0.0, 0.0, 0.0, 0.0
 
             integral = 0.0
-            for time_idx in 1:n_itr
+            @inbounds for time_idx in 1:n_itr
 
                 g_αααα, g_ααββ, g_ββββ    = g[time_idx, α,α,α,α], g[time_idx, α,α,β,β], g[time_idx, β,β,β,β]
 
@@ -584,7 +584,7 @@ function calc__dissipations_with_threads!(context::MrtContext)
         Γ_αα, Γ_αβ, Γ_βα, Γ_ββ      = 0.0, 0.0, 0.0, 0.0
 
         # Oscillator 별 독립적인 계산이라 local 변수도 필요 없고
-        # 멀티쓰레드 시, 작업 크기도 거의 비슷하니... static scheduling
+        # 멀티쓰레드 시, 작업 크기도 거의 비슷하니... static scheduling ( :static )
         @inbounds @threads :static for osc_idx in 1:n_osc
 
             ω        = oscs[osc_idx].freq
@@ -604,8 +604,14 @@ function calc__dissipations_with_threads!(context::MrtContext)
             # 아마 ω dʲ_αα/ √2 였어야 하는건데.
             γʲ_αα, γʲ_αβ, γʲ_βα, γʲ_ββ  = 0.0, 0.0, 0.0, 0.0
 
+            ####################################################
+
+            # Equation 60, 61
+            Gʲ_βα   = (λʲ_αααα - 2.0*λʲ_ααββ + λʲ_ββββ)
+            Δʲ_βα   = (λʲ_αααα - λʲ_ββββ) - (γʲ_αα - γʲ_ββ)
+
             integral = 0.0
-            for time_idx in 1:n_itr
+            @inbounds for time_idx in 1:n_itr
 
                 g_αααα, g_ααββ, g_ββββ    = g[time_idx, α,α,α,α], g[time_idx, α,α,β,β], g[time_idx, β,β,β,β]
 
@@ -623,9 +629,6 @@ function calc__dissipations_with_threads!(context::MrtContext)
                 f″ = (coth * cos_ωt * ω)        + 1.0im*(-sin_ωt * ω)
                 f‴ = (coth * (-sin_ωt) * ω^2)   + 1.0im*(-cos_ωt * ω^2)
 
-                # Equation 60, 61
-                Gʲ_βα   = (λʲ_αααα - 2.0*λʲ_ααββ + λʲ_ββββ)
-                Δʲ_βα   = (λʲ_αααα - λʲ_ββββ) - (γʲ_αα - γʲ_ββ)
                 # Equation 64
                 W_βα    = -1.0im*(g′_αβββ - g′_αβαα) - 2.0*Λ_αβαα + Γ_αβ                
                 X_βα    = -1.0im*(g′_βαββ - g′_βααα) - 2.0*Λ_βααα + Γ_βα    
@@ -727,7 +730,8 @@ function check__physics(context::MrtContext)
             # Equation 46, 52
             diss_ratio      = -𝒦ʲ_αβ / 𝒦ʲ_βα
             rate_ratio      = K_αβ / K_βα
-            boltz_ratio     = exp(-(ϵ_exci[α] - ϵ_exci[β]) / T)
+            boltz_ratio     = exp(-(ϵ_exci[β] - ϵ_exci[α]) / T)
+            # 실제로는 exp E_alpha + V_alphaalpha 일텐데, boltz ratio는 그냥 
 
             @printf(stderr,
                 "%3d -> %3d, OSC %5d | freq %13.6le | diss_ratio %13.6le | rate_ratio %13.6le |  boltz_ratio %13.6le\n",
