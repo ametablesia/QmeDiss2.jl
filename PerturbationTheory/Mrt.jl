@@ -580,7 +580,8 @@ function calc__dissipations_with_threads!(context::MrtContext)
         Λ_αβαα,  Λ_βααα             = Λ[α,β,α,α], Λ[β,α,α,α]
     
         # 이것도 마찬가지 에너지 shift 합이지. exciton coupling gamma의 합이 아님
-        Γ_αα, Γ_αβ, Γ_βα, Γ_ββ      = Γ[α,α], Γ[α,β], Γ[β,α], Γ[β,β]
+        # 근데 지금 이거 재할당의해서 캡처시 Boxed 되어버리니까 일단 주석처리.
+        # Γ_αα, Γ_αβ, Γ_βα, Γ_ββ      = Γ[α,α], Γ[α,β], Γ[β,α], Γ[β,β]
         Γ_αα, Γ_αβ, Γ_βα, Γ_ββ      = 0.0, 0.0, 0.0, 0.0
 
         # Oscillator 별 독립적인 계산이라 local 변수도 필요 없고
@@ -733,10 +734,12 @@ function check__physics(context::MrtContext)
             boltz_ratio     = exp(-(ϵ_exci[β] - ϵ_exci[α]) / T)
             # 실제로는 exp E_alpha + V_alphaalpha 일텐데, boltz ratio는 그냥 
 
-            @printf(stderr,
-                "%3d -> %3d, OSC %5d | freq %13.6le | diss_ratio %13.6le | rate_ratio %13.6le |  boltz_ratio %13.6le\n",
-                α, β, osc_idx, ω, diss_ratio, rate_ratio, boltz_ratio
-            )
+            if (osc_idx-1) % 50 == 0
+                @printf(stderr,
+                    "%3d -> %3d, OSC %5d | freq %13.6le | diss_ratio %13.6le | rate_ratio %13.6le |  boltz_ratio %13.6le\n",
+                    α, β, osc_idx, ω, diss_ratio, rate_ratio, boltz_ratio
+                )
+            end
         end
     end
     
