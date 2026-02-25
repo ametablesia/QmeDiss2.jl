@@ -22,6 +22,17 @@
 
 # @printf(stderr, "total count is %d \n", length(env.effective_oscillators))
 
+function test__FMO_7_sites()
+    env = Environment()
+    # add__spectral_density!(
+    #     env,
+    #     DrudeLorentzSpectralDensity(0.05, 1.0)
+    # )
+
+end
+
+
+
 function test__fret()
     @time println("starting fret calculation")
     env = Environment()
@@ -96,7 +107,12 @@ function test__mrt()
     end
 
     calc__rates!(mrt_ctx)
-    calc__dissipations!(mrt_ctx)
+
+    if Threads.nthreads() == 1
+        calc__dissipations!(mrt_ctx)
+    else
+        calc__dissipations_with_threads!(mrt_ctx)
+    end
 
     check__physics(mrt_ctx)
 end
