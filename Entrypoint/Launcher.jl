@@ -119,6 +119,47 @@ function test__mrt()
 end
 
 
+
+function test__cmrt()
+    env = Environment()
+
+    add__spectral_density!(
+        env, 
+        DrudeLorentzSpectralDensity(0.05, 1.0), 
+        SpectralDensityDecomposeInfo(2000, 30.0, 1.0, [1.0 0.0; 0.0 -1.0])
+    )
+    add__spectral_density!(
+        env,
+        DrudeLorentzSpectralDensity(0.2, 0.5), 
+        SpectralDensityDecomposeInfo(2000, 15.0, 1.0, [0.0 0.0; 0.0 1.0])
+    )
+
+    @printf(stderr, "total count is %d \n", length(env.effective_oscillators))
+
+    cmrt_ctx = create__cmrt_context(
+        System(;
+            size_of_system=2, 
+            system_hamiltonian=[1.0+0.0im 0.25+0.0im ; 0.25+0.0im -1.0+0.0im]
+        ),
+        env,
+        SimulationDetails(0.01, 0.1, 1000.0, Int64(1000.0/0.01))
+    )
+
+    calc__Λ!(cmrt_ctx)
+    calc__Γ!(cmrt_ctx)
+
+    if Threads.nthreads() == 1
+        calc__g_g′_and_g″!(cmrt_ctx)
+    else
+        calc__g_g′_and_g″_with_threads!(cmrt_ctx)
+    end
+
+    calc__rates!(cmrt_ctx)
+end
+
+
+
+
 BenchmarkTools.DEFAULT_PARAMETERS.samples = 10
 # @btime test__fret()
 # @btime test__mrt()

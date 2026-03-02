@@ -16,8 +16,9 @@ end
 
 mutable struct Patternized_g{T}
     ααββ::Array{T,3}   # (t, α, β)
+    αβββ::Array{T,3}   # (t, α, β)
     function Patternized_g{T}(n_sys::Int, n_itr::Int) where {T}
-        new(zeros(T, n_itr, n_sys, n_sys))
+        new(zeros(T, n_itr, n_sys, n_sys), zeros(T, n_itr, n_sys, n_sys))
     end
 end
 
@@ -793,5 +794,9 @@ function check__physics(context::MrtContext)
 end
 
 function calc__cmrt!(context::MrtContext)
+
+end
+
+function calc__cmrt_with_secular_approx(context::MrtContext)
 
 end

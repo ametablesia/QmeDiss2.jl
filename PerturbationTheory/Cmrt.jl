@@ -16,8 +16,9 @@ end
 
 mutable struct Patternized_g{T}
     ααββ::Array{T,3}   # (t, α, β)
+    αβββ::Array{T,3}   # (t, α, β)
     function Patternized_g{T}(n_sys::Int, n_itr::Int) where {T}
-        new(zeros(T, n_itr, n_sys, n_sys))
+        new(zeros(T, n_itr, n_sys, n_sys), zeros(T, n_itr, n_sys, n_sys))
     end
 end
 
@@ -146,7 +147,7 @@ mutable struct CmrtContext
     end
 end
 
-function create__mrt_context(
+function create__cmrt_context(
     system      ::System,
     environment ::Environment,
     simulation_details  ::SimulationDetails
@@ -792,7 +793,7 @@ function check__physics(context::CmrtContext)
     return nothing
 end
 
-# CMRT 논문에서...
+# CMRT 논문에서... 실제 rate 를 '진화' 시키는코드, 처음으로 초기값이 들어감!
 function calc__σ(context::CmrtContext)
 
     n_sys       = context.system.n_sys
