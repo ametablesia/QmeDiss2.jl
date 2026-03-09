@@ -816,3 +816,250 @@ function calc__σ(context::CmrtContext)
         end
     end
 end
+
+# pure dephasing 항을 구해요.
+function calc__R_pd!(ctx::CmrtContext)
+    n_sys   = ctx.system.n_sys
+    n_itr   = ctx.simulation_details.num_of_iteration
+
+    g′      = ctx.g′
+
+    R_pd = zeros(ComplexF64, n_itr, n_sys, n_sys)
+
+    @inbounds for time_idx in 1:n_itr
+        for β in 1:n_sys, α in 1:n_sys
+            if α == β
+                R_pd[time_idx,α,β] = 0.0 + 0.0im
+                continue
+            end
+            g′_αααα = g′[time_idx, α,α,α,α]
+            g′_ββββ = g′[time_idx, β,β,β,β]
+            g′_ααββ = g′[time_idx, α,α,β,β]
+
+            real_part = real(g′_αααα + g′_ββββ - 2.0*g′_ααββ)
+            imag_part = imag(g′_αααα - g′_ββββ)   # this goes into i*Im[...]
+
+            R_pd[time_idx,α,β] = real_part + 1.0im*imag_part
+        end
+    end
+
+    return R_pd
+end
+
+#dissipation rate (population transfer rate) 를 구해요.
+
+"""
+Compute time-dependent population transfer rate R_hist[t,a,b] defined by:
+
+R_ab(t) = 2 Re ∫_0^t dτ  F_b^*(τ) A_a(τ) X_ab(τ)
+
+We discretize τ on the same grid as (g,g′,g″) and build cumulative integrals
+with the trapezoidal rule, so R_hist[ti,a,b] corresponds to time t=(ti-1)*dt.
+
+Returns:
+- R_hist :: Array{Float64,3}  size (n_itr,n_sys,n_sys), with R[:,a,a]=0
+"""
+function calc__R_hist!(ctx::CmrtContext)
+    n_sys = ctx.system.n_sys
+    n_itr = ctx.simulation_details.num_of_iteration
+    dt    = ctx.simulation_details.Δt
+
+    ϵ = ctx.ϵ_exci
+    Λ = ctx.Λ
+    g = ctx.g
+    g′ = ctx.g′
+    g″ = ctx.g″
+
+    R_hist = zeros(Float64, n_itr, n_sys, n_sys)
+
+    # loop over (a,b), a!=b
+    @inbounds for a in 1:n_sys, b in 1:n_sys
+        if a == b
+            continue
+        end
+
+        λ_bbbb = Λ[b,b,b,b]
+        λ_aabb = Λ[a,a,b,b]
+        λ_babb = Λ[b,a,b,b]   # (b,a,b,b)
+        λ_abbb = Λ[a,b,b,b]   # (a,b,b,b)
+
+        # cummulator
+        I = 0.0 + 0.0im
+
+        # ti=1 corresponds to t=0 -> integral 0
+        R_hist[1,a,b] = 0.0
+
+        for ti in 2:n_itr
+            # trapezoid on [t_{ti-1}, t_{ti}]
+            t1 = (ti-2)*dt
+            t2 = (ti-1)*dt
+
+            # integrand at ti-1 and ti
+            f1 = _cmrt_integrand(ctx, a, b, ti-1, t1, ϵ, Λ, g, g′, g″, λ_bbbb, λ_aabb, λ_babb, λ_abbb)
+            f2 = _cmrt_integrand(ctx, a, b, ti,   t2, ϵ, Λ, g, g′, g″, λ_bbbb, λ_aabb, λ_babb, λ_abbb)
+
+            I += 0.5*dt*(f1 + f2)
+            R_hist[ti,a,b] = 2.0*real(I)
+        end
+    end
+
+    return R_hist
+end
+
+
+# --- internal helper: integrand = F_b^* A_a X_ab ---
+@inline function _cmrt_integrand(
+    ctx::CmrtContext,
+    a::Int, b::Int, ti::Int, t::Float64,
+    ϵ, Λ, g, g′, g″,
+    λ_bbbb, λ_aabb, λ_babb, λ_abbb
+)
+    # A_a(t) = exp(-i ε_a t - g_aaaa(t))
+    g_aaaa = g[ti, a,a,a,a]
+    A_a = exp(-1.0im*ϵ[a]*t - g_aaaa)
+
+    # F_b(t) = exp(-i(ε_b - 2λ_bbbb) t - g_bbbb^*(t))
+    # so F_b^*(t) = exp(+i(ε_b - 2λ_bbbb) t - g_bbbb(t))
+    g_bbbb = g[ti, b,b,b,b]
+    F_b_conj = exp(+1.0im*(ϵ[b] - 2.0*λ_bbbb)*t - g_bbbb)
+
+    # X_ab(t):
+    # pref = exp( 2*( g_aabb(t) + i λ_aabb t ) )
+    g_aabb = g[ti, a,a,b,b]
+    pref = exp( 2.0*(g_aabb + 1.0im*λ_aabb*t) )
+
+    # ddot g_{b a a b}(t) = g″[ti, b,a,a,b]  -> pattern a==d && b==c
+    ddg_baab = g″[ti, b,a,a,b]
+
+    # dot g terms:
+    # dot g_{b a a a} = g′[ti, b,a,a,a]  -> αβββ with (b,a)
+    dg_baaa = g′[ti, b,a,a,a]
+    # dot g_{b a b b} = g′[ti, b,a,b,b]  -> αβαα with (b,a)
+    dg_babb = g′[ti, b,a,b,b]
+
+    # dot g_{a b a a} = g′[ti, a,b,a,a]  -> αβαα with (a,b)
+    dg_abaa = g′[ti, a,b,a,a]
+    # dot g_{a b b b} = g′[ti, a,b,b,b]  -> αβββ with (a,b)
+    dg_abbb = g′[ti, a,b,b,b]
+
+    term1 = dg_baaa - dg_babb - 2.0im*λ_babb
+    term2 = dg_abaa - dg_abbb - 2.0im*λ_abbb
+
+    X_ab = pref * (ddg_baab - term1*term2)
+
+    return F_b_conj * A_a * X_ab
+end
+
+# ------------------------------------------------------------
+# Reduced dynamics with time-dependent R(t), Rpd(t)
+# ------------------------------------------------------------
+
+@inline function _interp_val(v1, v2, θ)
+    return (1.0-θ)*v1 + θ*v2
+end
+
+"""
+Simulate σ(t) using time-dependent R_hist and Rpd_hist.
+
+- R_hist[ti,a,b] = R_ab(t_i) with t_i = (ti-1)dt, and R_aa=0
+- Rpd_hist[ti,a,b] = Rpd_ab(t_i), complex allowed (as in your formula)
+
+Returns:
+- σ_hist :: Array{ComplexF64,3} (n_sys,n_sys,n_itr)
+"""
+function simulate__sigma_cmrt_time_dependent(
+    ctx::CmrtContext;
+    σ0::AbstractMatrix{<:Complex},
+    R_hist::Array{Float64,3},
+    Rpd_hist::Array{ComplexF64,3},
+    method::Symbol = :rk4,
+)
+    n_sys = ctx.system.n_sys
+    n_itr = ctx.simulation_details.num_of_iteration
+    dt    = ctx.simulation_details.Δt
+    ϵ     = ctx.ϵ_exci
+
+    @assert size(σ0,1)==n_sys && size(σ0,2)==n_sys
+    @assert size(R_hist,1)==n_itr && size(R_hist,2)==n_sys && size(R_hist,3)==n_sys
+    @assert size(Rpd_hist,1)==n_itr && size(Rpd_hist,2)==n_sys && size(Rpd_hist,3)==n_sys
+
+    σ = Matrix{ComplexF64}(σ0)
+    σ_hist = zeros(ComplexF64, n_sys, n_sys, n_itr)
+    σ_hist[:,:,1] .= σ
+
+    # RHS with linear interpolation between ti and ti+1:
+    # at time index ti with stage θ in {0,0.5,1} uses (ti, ti+1)
+    function rhs!(dσ, σ, ti::Int, θ::Float64)
+        fill!(dσ, 0.0 + 0.0im)
+
+        # interpolate R and Rpd at (ti,ti+1)
+        # also need out[a] = sum_f R[f,a]
+        out = zeros(Float64, n_sys)
+        @inbounds for a in 1:n_sys
+            s = 0.0
+            for f in 1:n_sys
+                if f == a; continue; end
+                Rfa = _interp_val(R_hist[ti,f,a], R_hist[ti+1,f,a], θ)
+                s += Rfa
+            end
+            out[a] = s
+        end
+
+        @inbounds for a in 1:n_sys, b in 1:n_sys
+            if a == b
+                acc = 0.0 + 0.0im
+                σaa = σ[a,a]
+                for f in 1:n_sys
+                    if f == a; continue; end
+                    Raf = _interp_val(R_hist[ti,a,f], R_hist[ti+1,a,f], θ)
+                    Rfa = _interp_val(R_hist[ti,f,a], R_hist[ti+1,f,a], θ)
+                    acc += Raf*σ[f,f] - Rfa*σaa
+                end
+                dσ[a,a] = acc
+            else
+                Rpd_ab = _interp_val(Rpd_hist[ti,a,b], Rpd_hist[ti+1,a,b], θ)
+                damping = Rpd_ab + 0.5*(out[a] + out[b])
+                ωab = ϵ[a] - ϵ[b]
+                dσ[a,b] = (-1.0im*ωab - damping) * σ[a,b]
+            end
+        end
+
+        return dσ
+    end
+
+    if method == :euler
+        dσ = zeros(ComplexF64, n_sys, n_sys)
+        @inbounds for ti in 1:(n_itr-1)
+            rhs!(dσ, σ, ti, 0.0)
+            @. σ = σ + dt*dσ
+            σ_hist[:,:,ti+1] .= σ
+        end
+
+    elseif method == :rk4
+        k1 = zeros(ComplexF64, n_sys, n_sys)
+        k2 = zeros(ComplexF64, n_sys, n_sys)
+        k3 = zeros(ComplexF64, n_sys, n_sys)
+        k4 = zeros(ComplexF64, n_sys, n_sys)
+        tmp = zeros(ComplexF64, n_sys, n_sys)
+
+        @inbounds for ti in 1:(n_itr-1)
+            rhs!(k1, σ, ti, 0.0)
+
+            @. tmp = σ + (0.5*dt)*k1
+            rhs!(k2, tmp, ti, 0.5)
+
+            @. tmp = σ + (0.5*dt)*k2
+            rhs!(k3, tmp, ti, 0.5)
+
+            @. tmp = σ + dt*k3
+            rhs!(k4, tmp, ti, 1.0)
+
+            @. σ = σ + (dt/6.0)*(k1 + 2k2 + 2k3 + k4)
+            σ_hist[:,:,ti+1] .= σ
+        end
+    else
+        error("Unknown method=$method. Use :euler or :rk4")
+    end
+
+    return σ_hist
+end

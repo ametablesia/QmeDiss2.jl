@@ -14,7 +14,7 @@ end
 
 function add__spectral_density!(
     environment         ::Environment,
-    spectral_density    ::DrudeLorentzSpectralDensity,
+    spectral_density    ::SpectralDensity,
     decompose_info      ::SpectralDensityDecomposeInfo
 )
     # decompose to oscs

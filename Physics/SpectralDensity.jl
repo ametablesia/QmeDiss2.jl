@@ -26,7 +26,12 @@ mutable struct OhmicTypeSpectralDensity <: SpectralDensity
     ω_c ::Float64   # cutoff freq
 end
 
-## WRAN pi가 나눠져 있어요.
+mutable struct SuperOhmicDebyeSpectralDensity <: SpectralDensity 
+    γ   ::Float64   # exciton-phonon soupling strength
+    ω_c ::Float64   # cutoff freq
+end
+
+# WRAN pi가 나눠져 있어요.
 @inline function J(info::DrudeLorentzSpectralDensity, ω)
     λ = info.λ
     γ = info.γ
@@ -56,6 +61,13 @@ end
     ω_c = info.ω_c
     
     return η * ω^s * exp(-ω/ω_c)
+end
+
+@inline function J(info::SuperOhmicDebyeSpectralDensity, ω)
+    ω_c = info.ω_c
+    γ   = info.γ
+
+    return γ * (ω^3) * exp(-ω / ω_c) / (π * ω_c^2)
 end
 
 @inline function calc__spectral_density(info::SpectralDensity, freq)
@@ -234,12 +246,101 @@ function decompose__spectral_density_into_effective_oscillators!(
     return nothing
 end
 
+function decompose__spectral_density_into_effective_oscillators!(
+    oscillators         ::Vector{EffectiveOscillator},
+    spectral_density    ::SuperOhmicDebyeSpectralDensity,
+    decompose_info      ::SpectralDensityDecomposeInfo
+)
+    n_sampled   ::Int64             = decompose_info.num_of_sampled_freq
+    ω_max       ::Float64           = decompose_info.freq_max
+    temp        ::Float64           = decompose_info.temperature
+    coup        ::Matrix{Float64}   = decompose_info.site_bath_coupling_strength
+    γ           ::Float64           = spectral_density.γ
+
+    β_th        ::Float64           = 1.0 / temp
+
+    # check for reorganization energy summation
+    λ_sum       ::Float64           = 0.0
+
+    resize!(oscillators, n_sampled)
+    for j in 1:n_sampled
+        oscillators[j] = EffectiveOscillator(
+            spectral_density_id             = 0,
+            freq                            = 0.0,
+            coth                            = 0.0,
+            spread                          = 0.0,
+            temperature                     = temp,
+            site_bath_coupling_strength     = zeros(size(coup))
+        )
+    end
+
+    Δx  ::Float64 = 1.0 / n_sampled
+    @inbounds for j in 1:n_sampled
+
+        ### Quadratic mapping (low ω -> dense sampling)
+        x_j         = j * Δx
+        ω_j         = ω_max * x_j^2
+        Δω          = 2.0 * ω_max * x_j * Δx       # dω(x) = ω_max x^2
+
+        J_ω_j       = J(spectral_density, ω_j)   # J(ω_j)
+        weight      = sqrt(J_ω_j * Δω) / ω_j     # √ gaussian quadrature weight * J(ω) Δω / ω^2 
+
+        coth_j      = coth(0.5 * β_th * ω_j)     # coth(1/2 * β ω)
+        spread_j    = Δω
+        #spread_j    = 2.0 * ω_j * (x / Δx)       # spread
+        # coup_j      = weight * coup           # 행렬복사 방지 위해서...
+        
+        ### Effective oscillator
+        # oscillators[j] = EffectiveOscillator(
+        #     spectral_density_id             = 0,
+        #     freq                            = ω_j,
+        #     coth                            = coth_j,
+        #     spread                          = spread_j,
+        #     temperature                     = temp,
+        #     site_bath_coupling_strength     = coup_j
+        # )
+        oscillators[j].spectral_density_id             = 0
+        oscillators[j].freq                            = ω_j
+        oscillators[j].coth                            = coth_j
+        oscillators[j].spread                          = spread_j
+        oscillators[j].temperature                     = temp
+        @. oscillators[j].site_bath_coupling_strength     = weight * coup
+
+        λ_sum += ω_j * weight * weight
+
+        # @printf(stderr, "J_ω_j          %15.6e a.u.\n", J_ω_j)
+        # @printf(stderr, "ωj          %15.6e a.u.\n", ω_j)
+        # @printf(stderr, "gamma_raw   %15.6e a.u.\n", weight)
+    end
+
+    @printf(stderr, "--------------------------------------------------\n")
+    @printf(stderr, "Spectral density file - Drude-Lorentz\n")
+    @printf(stderr, "w_cutoff          %15.6e a.u.   %15.6e waveno.\n",γ, γ / WAVENUMBER_TO_ENERGY)
+    @printf(stderr, "ω_max             %15.6e a.u.   %15.6e waveno.\n", ω_max, ω_max / WAVENUMBER_TO_ENERGY)
+    
+    @printf(stderr, "Coupling\n")
+    # n_row, n_col = size(coup)
+    @inbounds for i in axes(coup, 1)
+        for j in axes(coup, 2)
+            @printf(stderr, "%8.3f", coup[i, j])
+        end
+        @printf(stderr, "\n")
+    end
+
+    return nothing
+end
+
+
 # function alias for short-name lovers.
 const decompose__spd_into_osc! = decompose__spectral_density_into_effective_oscillators!
 
 
 
-## TESTING CODE
+
+
+
+
+# TESTING CODE
 # oscillators = Vector{EffectiveOscillator}()
 # spectral_density = DrudeLorentzSpectralDensity(0.05, 1.0)
 # decompose_info = SpectralDensityDecomposeInfo(2000, 30.0, 1.0, [1.0 0.0; 0.0 -1.0])
