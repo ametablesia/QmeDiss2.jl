@@ -8,7 +8,13 @@ using Cthulhu
 @time include("../Physics/Physics.jl")
 @time include("../PerturbationTheory/Fret.jl")
 @time include("../PerturbationTheory/Mrt.jl")
-@time include("../PerturbationTheory/Cmrt.jl")
+@time include("../Utils/HighDimensionalDataContainer.jl")
+@time include("../PerturbationTheory/Mrt_HighDim.jl")
+using .MrtHighDim
+
+# @time include("../PerturbationTheory/Cmrt.jl")
+
+println(filter(x -> occursin("Patternized", String(x)), string.(names(Main, all=true))))
 
 # spectral_density_1 = DrudeLorentzSpectralDensity(0.05, 1.0)
 # decompose_info_1 = SpectralDensityDecomposeInfo(2000, 30.0, 1.0, [1.0 0.0; 0.0 -1.0])
@@ -31,7 +37,6 @@ function test__FMO_7_sites()
     # )
 
 end
-
 
 
 function test__fret()
@@ -117,6 +122,54 @@ function test__mrt()
     end
 
     check__physics(mrt_ctx)
+end
+
+
+
+function test__mrt_high_dim()
+    env = Environment()
+
+    add__spectral_density!(
+        env, 
+        DrudeLorentzSpectralDensity(0.05, 1.0), 
+        SpectralDensityDecomposeInfo(2000, 30.0, 1.0, [1.0 0.0; 0.0 -1.0])
+    )
+    add__spectral_density!(
+        env,
+        DrudeLorentzSpectralDensity(0.2, 0.5), 
+        SpectralDensityDecomposeInfo(2000, 15.0, 1.0, [0.0 0.0; 0.0 1.0])
+    )
+
+    @printf(stderr, "total count is %d \n", length(env.effective_oscillators))
+
+    mrt_ctx = MrtHighDim.create__mrt_context(
+        System(;
+            size_of_system=2, 
+            system_hamiltonian=[1.0+0.0im 0.25+0.0im ; 0.25+0.0im -1.0+0.0im]
+        ),
+        env,
+        SimulationDetails(0.01, 0.1, 1000.0, Int64(1000.0/0.01))
+    )
+
+    MrtHighDim.calc__Λ!(mrt_ctx)
+    MrtHighDim.calc__Γ!(mrt_ctx)
+
+    if Threads.nthreads() == 1
+        MrtHighDim.calc__g_g′_and_g″!(mrt_ctx)
+    else
+        MrtHighDim.calc__g_g′_and_g″_with_threads!(mrt_ctx)
+    end
+
+    MrtHighDim.calc__rates!(mrt_ctx)
+
+    if Threads.nthreads() == 1
+        MrtHighDim.calc__dissipations!(mrt_ctx)
+    else
+        # @descend calc__dissipations_with_threads!(mrt_ctx)
+        MrtHighDim.calc__dissipations_with_threads!(mrt_ctx)
+    end
+
+    MrtHighDim.check__physics(mrt_ctx)
 end
 
 
@@ -227,5 +280,5 @@ BenchmarkTools.DEFAULT_PARAMETERS.samples = 10
 # @btime test__mrt()
 
 # test__fret()
-# test__mrt()
-test__cmrt()
+test__mrt()
+# test__cmrt()
