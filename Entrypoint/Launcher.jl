@@ -4,15 +4,22 @@ using Cthulhu
 @time using LinearAlgebra
 @time using Base.Threads
 @time using BenchmarkTools
+using Printf
 
-@time include("../Physics/Physics.jl")
+include("../Physics/Physics.jl")
+
+
 @time include("../PerturbationTheory/Fret.jl")
 @time include("../PerturbationTheory/Mrt.jl")
 @time include("../Utils/HighDimensionalDataContainer.jl")
 @time include("../PerturbationTheory/Mrt_HighDim.jl")
 using .MrtHighDim
-
 # @time include("../PerturbationTheory/Cmrt.jl")
+@time include("../PerturbationTheory/CoherenceMrt.jl")
+
+
+using .Physics
+using .CoherenceMrt
 
 println(filter(x -> occursin("Patternized", String(x)), string.(names(Main, all=true))))
 
@@ -172,8 +179,6 @@ function test__mrt_high_dim()
     MrtHighDim.check__physics(mrt_ctx)
 end
 
-
-
 function test__cmrt()
     ω_c     = 1
     β       = 1 / ω_c
@@ -273,6 +278,151 @@ function test__cmrt()
 end
 
 
+function test__coherence_mrt()
+    env = Environment()
+
+    add__spectral_density!(
+        env,
+        DrudeLorentzSpectralDensity(0.05, 1.0),
+        SpectralDensityDecomposeInfo(2000, 30.0, 1.0, [1.0 0.0; 0.0 -1.0])
+    )
+    add__spectral_density!(
+        env,
+        DrudeLorentzSpectralDensity(0.2, 0.5),
+        SpectralDensityDecomposeInfo(2000, 15.0, 1.0, [0.0 0.0; 0.0 1.0])
+    )
+
+    @printf(stderr, "total oscillator count = %d\n", length(env.effective_oscillators))
+
+    mrt_ctx = CoherenceMrt.create__mrt_context(
+        System(;
+            size_of_system=2,
+            system_hamiltonian=[1.0+0.0im 0.25+0.0im;
+                                0.25+0.0im -1.0+0.0im]
+        ),
+        env,
+        SimulationDetails(0.01, 0.1, 1000.0, Int64(1000.0 / 0.01))
+    )
+
+    CoherenceMrt.calc__Λ!(mrt_ctx)
+    CoherenceMrt.calc__Γ!(mrt_ctx)
+
+    if Threads.nthreads() == 1
+        CoherenceMrt.calc__g_g′_and_g″!(mrt_ctx)
+    else
+        CoherenceMrt.calc__g_g′_and_g″_with_threads!(mrt_ctx)
+    end
+
+    CoherenceMrt.calc__rates!(mrt_ctx)
+
+    if Threads.nthreads() == 1
+        CoherenceMrt.calc__dissipations!(mrt_ctx)
+    else
+        CoherenceMrt.calc__dissipations_with_threads!(mrt_ctx)
+    end
+
+    CoherenceMrt.check__physics(mrt_ctx)
+
+    # ------------------------------------------------------------
+    # coherence test (exciton-basis sigma_{alpha beta})
+    # ------------------------------------------------------------
+    n_sys = mrt_ctx.system.n_sys
+    n_itr = mrt_ctx.simulation_details.num_of_iteration
+    Δt    = mrt_ctx.simulation_details.Δt
+    U     = mrt_ctx.U_sys
+
+    # site-basis initial density matrix (Hermitian, trace = 1)
+    ρ_site0 = ComplexF64[
+        0.70 + 0.00im   0.20 + 0.10im
+        0.20 - 0.10im   0.30 + 0.00im
+    ]
+
+    # transform to exciton basis: sigma = U^\dagger rho_site U
+    σ0 = U' * ρ_site0 * U
+
+    σ_history    = zeros(ComplexF64, n_sys, n_sys, n_itr)
+    dotσ_history = zeros(ComplexF64, n_sys, n_sys, n_itr)
+
+    σ_history[:, :, 1] .= σ0
+
+    @printf(stderr, "\n================ coherence test ================\n")
+    @printf(stderr, "Initial sigma in exciton basis\n")
+    for a in 1:n_sys
+        for b in 1:n_sys
+            z = σ_history[a, b, 1]
+            @printf(stderr, "σ0[%d,%d] = % .8e %+.8ei\n", a, b, real(z), imag(z))
+        end
+    end
+
+    print_indices = unique(sort!(Int[
+        1,
+        min(10, n_itr),
+        min(100, n_itr),
+        min(1000, n_itr),
+        n_itr,
+    ]))
+
+    # simple forward Euler propagation of coherence sector only
+    # note: the current RHS fills only off-diagonal entries.
+    for time_idx in 1:n_itr
+        σ_now = @view σ_history[:, :, time_idx]
+        dotσ_now = @view dotσ_history[:, :, time_idx]
+
+        CoherenceMrt.calc__coherence_rhs!(dotσ_now, mrt_ctx, σ_now, time_idx)
+
+        @printf(stderr, "CURRENT TIMEIDX: %d\n", time_idx)
+        if time_idx in print_indices
+            t = (time_idx - 1) * Δt
+            @printf(stderr, "\n---- coherence snapshot: time_idx = %d, t = %.6f ----\n", time_idx, t)
+            for a in 1:n_sys
+                for b in 1:n_sys
+                    zσ   = σ_now[a, b]
+                    zdot = dotσ_now[a, b]
+                    @printf(stderr,
+                        "σ[%d,%d] = % .8e %+.8ei    dotσ[%d,%d] = % .8e %+.8ei\n",
+                        a, b, real(zσ), imag(zσ), a, b,
+                        real(zdot), imag(zdot)
+                    )
+                end
+            end
+        end
+
+        if time_idx < n_itr
+            σ_next = @view σ_history[:, :, time_idx + 1]
+            @inbounds for b in 1:n_sys, a in 1:n_sys
+                σ_next[a, b] = σ_now[a, b] + Δt * dotσ_now[a, b]
+            end
+
+            # keep Hermiticity numerically
+            σ_next[:, :] .= 0.5 .* (σ_next[:, :] .+ adjoint(σ_next[:, :]))
+
+            # keep trace normalized
+            trσ = real(sum(diag(σ_next)))
+            if abs(trσ) > 1e-14
+                σ_next[:, :] ./= trσ
+            end
+        end
+    end
+
+    @printf(stderr, "\nFinal sigma in exciton basis\n")
+    for a in 1:n_sys
+        for b in 1:n_sys
+            z = σ_history[a, b, n_itr]
+            @printf(stderr, "σ_final[%d,%d] = % .8e %+.8ei\n", a, b, real(z), imag(z))
+        end
+    end
+
+    @printf(stderr, "\nFinal dot sigma\n")
+    for a in 1:n_sys
+        for b in 1:n_sys
+            z = dotσ_history[a, b, n_itr]
+            @printf(stderr, "dotσ_final[%d,%d] = % .8e %+.8ei\n", a, b, real(z), imag(z))
+        end
+    end
+
+    return (; mrt_ctx, ρ_site0, σ0, σ_history, dotσ_history)
+end
+
 
 
 BenchmarkTools.DEFAULT_PARAMETERS.samples = 10
@@ -280,5 +430,6 @@ BenchmarkTools.DEFAULT_PARAMETERS.samples = 10
 # @btime test__mrt()
 
 # test__fret()
-test__mrt()
+# test__mrt()
 # test__cmrt()
+test__coherence_mrt()

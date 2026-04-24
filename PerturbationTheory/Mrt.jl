@@ -1,5 +1,5 @@
 
-include("../Physics/Physics.jl")
+using ..Physics
 using Base.Threads
 using LinearAlgebra
 import Base: getindex

@@ -8,7 +8,8 @@
 using LinearAlgebra
 using LoopVectorization
 using Base.Threads
-include("../Physics/Physics.jl")
+
+using ..Physics
 
 # computing context
 mutable struct FretContext

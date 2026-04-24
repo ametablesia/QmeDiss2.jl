@@ -2,7 +2,9 @@
 module MrtHighDim
 
 include("../Utils/HighDimensionalDataContainer.jl")
-include("../Physics/Physics.jl")
+
+using ..Physics
+using Printf
 
 using Base.Threads
 using LinearAlgebra
