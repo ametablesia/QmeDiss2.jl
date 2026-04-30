@@ -1,5 +1,5 @@
 
-module CoherenceMrt
+module Rmrt
 
 include("../Utils/HighDimensionalDataContainer.jl")
 include("../Physics/Physics.jl")
@@ -42,7 +42,7 @@ end
     rule(αββα, Array{T,3}, zeros(T, n_itr, n_sys, n_sys), (t, a, b), a == d && b == c)
 end
 
-mutable struct MrtContext
+mutable struct RmrtContext
     # input
     system              ::System
     environment         ::Environment
@@ -88,14 +88,9 @@ mutable struct MrtContext
     end
 end
 
+create__rmrt_context(system::System, environment::Environment, simulation_details::SimulationDetails) = RmrtContext(system, environment, simulation_details)
+create__rmrt_context(;system::System, environment::Environment, simulation_details::SimulationDetails) = RmrtContext(system, environment, simulation_details)
 
-function create__mrt_context(
-    system      ::System,
-    environment ::Environment,
-    simulation_details  ::SimulationDetails
-)
-    return MrtContext(system, environment, simulation_details)
-end
 
 # Equation 65
 function calc__Λ!(context::MrtContext)
@@ -167,7 +162,7 @@ function calc__Γ!(context::MrtContext)
     end
 end
 
-function calc__g_g′_and_g″!(context::MrtContext)
+function calc__g_g′_g″!(context::RmrtContext)
     n_sys   = context.system.n_sys
     n_osc   = context.environment.num_of_effective_oscillators
     oscs    = context.environment.effective_oscillators
@@ -180,10 +175,6 @@ function calc__g_g′_and_g″!(context::MrtContext)
     g″      = context.g″
 
     γ_exci  = context.γ_exci
-
-    # fill!(g , 0)
-    # fill!(g′, 0)
-    # fill!(g″, 0)
 
     @inbounds for osc_idx = 1:n_osc
     

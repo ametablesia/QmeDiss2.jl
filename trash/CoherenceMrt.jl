@@ -18,7 +18,16 @@ using ..Physics:
     SpectralDensityDecomposeInfo,
     add__spectral_density!
 
-# 매크로로 타입 정의
+@show @isdefined(Patternized_g)
+@show @isdefined(Patternized_g′)
+@show @isdefined(Patternized_g″)
+@show @isdefined(Patternized_Λ)
+
+@isdefined(Patternized_g)  && error("Patternized_g already defined before this file finished loading")
+@isdefined(Patternized_g′) && error("Patternized_g′ already defined before this file finished loading")
+@isdefined(Patternized_g″) && error("Patternized_g″ already defined before this file finished loading")
+@isdefined(Patternized_Λ)  && error("Patternized_Λ already defined before this file finished loading")
+
 @patternized Patternized_Λ (n_sys::Int) (a::Int, b::Int, c::Int, d::Int) begin
     rule(ααββ, Matrix{T}, zeros(T, n_sys, n_sys), (a, a), a == b && b == c && c == d)  # aaaa bbbb
     rule(ααββ, Matrix{T}, zeros(T, n_sys, n_sys), (a, c), a == b && c == d)            # aabb
@@ -42,6 +51,13 @@ end
     rule(αββα, Array{T,3}, zeros(T, n_itr, n_sys, n_sys), (t, a, b), a == d && b == c)
 end
 
+# 매크로가 잘 선언되었나 확인.
+@show @isdefined(Patternized_g)
+@show @isdefined(Patternized_g′)
+@show @isdefined(Patternized_g″)
+@show @isdefined(Patternized_Λ)
+println(filter(x -> occursin("Patternized", String(x)), string.(names(Main, all=true))))
+
 mutable struct MrtContext
     # input
     system              ::System
@@ -49,7 +65,7 @@ mutable struct MrtContext
     simulation_details  ::SimulationDetails
 
     # computing context
-    γ_exci              ::Array{ComplexF64, 3}    # 원래는 oscillator 안에 들어가는 coupling strength 의 exciton verison인데, 음.
+    γ_exci              ::Array{ComplexF64, 3}    # 원래는 oscillator 안에 들어가는 coupling strenght 의 exciton verison인데, 음.
     ϵ_exci              ::Vector{Float64}               # energy in exciton basis
     ϵ_exci_0            ::Vector{Float64}               # energy - reorganization energy
     U_sys               ::Matrix{ComplexF64}            # eigenvector matrix
@@ -87,7 +103,6 @@ mutable struct MrtContext
         new(system, environment, simulation_details, γ_exci, ϵ_exci, ϵ_exci_0, U_sys, g, g′, g″, Λ, Γ, transition_rate, dissipation)
     end
 end
-
 
 function create__mrt_context(
     system      ::System,
