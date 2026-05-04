@@ -16,10 +16,12 @@ include("../Physics/Physics.jl")
 using .MrtHighDim
 # @time include("../PerturbationTheory/Cmrt.jl")
 @time include("../PerturbationTheory/CoherenceMrt.jl")
+@time include("../PerturbationTheory/Rmrt.jl")
 
 
 using .Physics
 using .CoherenceMrt
+using .Rmrt
 
 println(filter(x -> occursin("Patternized", String(x)), string.(names(Main, all=true))))
 
@@ -277,6 +279,85 @@ function test__cmrt()
     @printf(stderr, "Program terminated")
 end
 
+function test__rmrt()
+    ω_c     = 1.0
+    β       = 1 / ω_c
+    J_0     = ComplexF64(0.5 * ω_c)
+    Δ       = ComplexF64(0.5 * ω_c)
+    γ       = 0.2
+    ω_max   = ω_c * 2.0
+
+    env = Environment()
+
+    add__spectral_density!(
+        env,
+        SuperOhmicDebyeSpectralDensity(γ, ω_c),
+        SpectralDensityDecomposeInfo(
+            2000,
+            ω_max,
+            1 / β,
+            [1.0 0.0; 0.0 0.0]
+        )
+    )
+
+    add__spectral_density!(
+        env,
+        SuperOhmicDebyeSpectralDensity(γ, ω_c),
+        SpectralDensityDecomposeInfo(
+            2000,
+            ω_max,
+            1 / β,
+            [0.0 0.0; 0.0 1.0]
+        )
+    )
+
+    @printf(stderr, "total count is %d \n", length(env.effective_oscillators))
+
+    rmrt_ctx = Rmrt.create__rmrt_context(
+        System(;
+            size_of_system = 2,
+            system_hamiltonian = [
+                Δ    J_0
+                J_0 -Δ
+            ]
+        ),
+        env,
+        SimulationDetails(
+            0.1,
+            0.1,
+            5000.0,
+            Int64(5000.0 / 0.1)
+        )
+    )
+
+    # 1. Exciton basis 계산
+    Rmrt.calc__exciton_energy!(rmrt_ctx)
+
+    # 2. site-basis coupling을 exciton-basis coupling으로 변환
+    Rmrt.calc__exciton_basis_and_γ_exci!(rmrt_ctx)
+
+    # 3. g, g′, g″ 계산
+    if Threads.nthreads() == 1
+        Rmrt.calc__g_g′_g″!(rmrt_ctx)
+    else
+        Rmrt.calc__g_g′_g″_with_threads!(rmrt_ctx)
+    end
+
+    # 4. 초기 density matrix
+    Rmrt.set__initial_σ!(rmrt_ctx; init_state = 1)
+
+    # 5. 전체 σ, σ′ time propagation
+    Rmrt.calc__σ_σ′!(rmrt_ctx)
+
+    Rmrt.save__rmrt_reduced_dynamics!(
+        rmrt_ctx;
+        save_filename = "rmrt.txt",
+        basis = :both,
+    )
+
+    return rmrt_ctx
+end
+
 
 function test__coherence_mrt()
     env = Environment()
@@ -432,4 +513,5 @@ BenchmarkTools.DEFAULT_PARAMETERS.samples = 10
 # test__fret()
 # test__mrt()
 # test__cmrt()
-test__coherence_mrt()
+# test__coherence_mrt()
+text__rmrt()

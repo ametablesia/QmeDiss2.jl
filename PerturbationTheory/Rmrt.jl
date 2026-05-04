@@ -76,6 +76,7 @@ mutable struct RmrtContext
     g″                  ::Patternized_g″{ComplexF64}
 
     # Reduced Density Matrix and its Time-derivatives
+    curr_itr            ::UInt64
     σ                   ::Array{ComplexF64, 3}
     σ′                  ::Array{ComplexF64, 3}
 
@@ -105,7 +106,7 @@ mutable struct RmrtContext
         σ       = zeros(ComplexF64, n_sys, n_sys, n_itr)
         σ′      = zeros(ComplexF64, n_sys, n_sys, n_itr)
 
-        new(system, environment, simulation_details, γ_exci, ϵ_exci, ϵ_exci_0, U_sys, g, g′, g″, σ, σ′)
+        new(system, environment, simulation_details, γ_exci, ϵ_exci, ϵ_exci_0, U_sys, g, g′, g″, 1, σ, σ′)
     end
 end
 
@@ -113,7 +114,7 @@ create__rmrt_context(system::System, environment::Environment, simulation_detail
 create__rmrt_context(;system::System, environment::Environment, simulation_details::SimulationDetails) = RmrtContext(system, environment, simulation_details)
 
 
-
+# Exciton basis 에서 에너지를 읽자.
 function calc__ϵ_exci!(context::RmrtContext)
 
     H_sys       = context.system.H_sys
@@ -126,7 +127,194 @@ function calc__ϵ_exci!(context::RmrtContext)
     U_sys       .= eigen_result.vectors     # copy
 end
 
+function calc__γ_exci!(
+    context::RmrtContext;
+    update_energy::Bool = false,
+    update_shifted_energy::Bool = true,
+)
+    if update_energy
+        calc__ϵ_exci!(context)
+    end
 
+    n_sys       = context.system.n_sys
+    n_osc       = context.environment.num_of_effective_oscillators
+    oscs        = context.environment.effective_oscillators
+
+    U_sys       = context.U_sys
+    ϵ_exci      = context.ϵ_exci
+    ϵ_exci_0    = context.ϵ_exci_0
+    γ_exci      = context.γ_exci
+
+    fill!(γ_exci, 0.0 + 0.0im)
+
+    # λ_diag[α] corresponds to Λ_{αααα}
+    λ_diag = zeros(ComplexF64, n_sys)
+
+    @inbounds for osc_idx in 1:n_osc
+        ω      = oscs[osc_idx].freq
+        γ_site = oscs[osc_idx].site_bath_coupling_strength
+
+        # site basis -> exciton basis
+        γ_exci[osc_idx, :, :] .= U_sys' * γ_site * U_sys
+
+        if update_shifted_energy
+            for α in 1:n_sys
+                λ_diag[α] += ω * γ_exci[osc_idx, α, α] * γ_exci[osc_idx, α, α]
+            end
+        end
+    end
+
+    if update_shifted_energy
+        @inbounds for α in 1:n_sys
+            ϵ_exci_0[α] = ϵ_exci[α] - real(λ_diag[α])
+        end
+    end
+
+    return γ_exci
+end
+
+function calc__exciton_basis_and_γ_exci!(context::RmrtContext)
+    calc__ϵ_exci!(context)
+    calc__γ_exci!(context; update_energy = false, update_shifted_energy = true)
+    return context
+end
+
+
+@inline function zero__g_g′_g″!(
+    g  ::Patternized_g{ComplexF64},
+    g′ ::Patternized_g′{ComplexF64},
+    g″ ::Patternized_g″{ComplexF64},
+)
+    # g canonical patterns
+    fill!(g.αααα, 0.0 + 0.0im)
+    fill!(g.ααββ, 0.0 + 0.0im)
+
+    # g′ canonical patterns
+    fill!(g′.αααα, 0.0 + 0.0im)
+    fill!(g′.αααβ, 0.0 + 0.0im)
+    fill!(g′.ααββ, 0.0 + 0.0im)
+    fill!(g′.ααβγ, 0.0 + 0.0im)
+    fill!(g′.αβαα, 0.0 + 0.0im)
+    fill!(g′.αβββ, 0.0 + 0.0im)
+    fill!(g′.αβγγ, 0.0 + 0.0im)
+
+    # g″ canonical patterns
+    fill!(g″.αββα, 0.0 + 0.0im)
+    fill!(g″.αββγ, 0.0 + 0.0im)
+    fill!(g″.αβγδ, 0.0 + 0.0im)
+
+    return nothing
+end
+
+@inline function accumulate__g_g′_g″__one_oscillator!(
+    g       ::Patternized_g{ComplexF64},
+    g′      ::Patternized_g′{ComplexF64},
+    g″      ::Patternized_g″{ComplexF64},
+    γ_exci  ::Array{ComplexF64, 3},
+    osc_idx ::Int,
+    ω       ::Float64,
+    coth    ::Float64,
+    n_sys   ::Int,
+    n_itr   ::Int,
+    Δt      ::Float64,
+)
+    γ = @view γ_exci[osc_idx, :, :]
+
+    @inbounds for time_idx in 1:n_itr
+        t   = (time_idx - 1) * Δt
+        ωt  = ω * t
+        sin_ωt, cos_ωt = sincos(ωt)
+
+        # Common scalar factors.
+        # g_{abcd}(t)   = γ_ab γ_cd * F_g(t)
+        # g′_{abcd}(t)  = γ_ab γ_cd * F_g′(t)
+        # g″_{abcd}(t)  = γ_ab γ_cd * F_g″(t)
+        F_g  = (coth * (1.0 - cos_ωt)) + 1.0im * (sin_ωt - ωt)
+        F_g′ = ω * ((coth * sin_ωt) + 1.0im * (cos_ωt - 1.0))
+        F_g″ = (ω^2) * ((coth * cos_ωt) - 1.0im * sin_ωt)
+
+        # ---------------------------------------------------------------------
+        # g canonical patterns
+        #   αααα, ααββ
+        # ---------------------------------------------------------------------
+        for β in 1:n_sys, α in 1:n_sys
+            g[time_idx, α, α, β, β] += γ[α, α] * γ[β, β] * F_g
+        end
+
+        # ---------------------------------------------------------------------
+        # g′ canonical patterns
+        #   αααα, αααβ, ααββ, ααβγ, αβαα, αβββ, αβγγ
+        # ---------------------------------------------------------------------
+        for α in 1:n_sys
+            γ_αα = γ[α, α]
+
+            # αααα
+            g′[time_idx, α, α, α, α] += γ_αα * γ_αα * F_g′
+
+            for α⁻ in 1:n_sys
+                α⁻ == α && continue
+
+                γ_αα⁻ = γ[α, α⁻]
+                γ_α⁻α⁻ = γ[α⁻, α⁻]
+
+                # αααβ : g′_{αααα⁻}
+                g′[time_idx, α, α, α, α⁻] += γ_αα * γ_αα⁻ * F_g′
+
+                # ααββ : g′_{ααα⁻α⁻}
+                g′[time_idx, α, α, α⁻, α⁻] += γ_αα * γ_α⁻α⁻ * F_g′
+
+                # αβαα : g′_{αα⁻αα}
+                g′[time_idx, α, α⁻, α, α] += γ_αα⁻ * γ_αα * F_g′
+
+                # αβββ : g′_{αα⁻α⁻α⁻}
+                g′[time_idx, α, α⁻, α⁻, α⁻] += γ_αα⁻ * γ_α⁻α⁻ * F_g′
+
+                for α⁼ in 1:n_sys
+                    (α⁼ == α || α⁼ == α⁻) && continue
+
+                    # ααβγ : g′_{αα α⁻ α⁼}
+                    g′[time_idx, α, α, α⁻, α⁼] += γ_αα * γ[α⁻, α⁼] * F_g′
+
+                    # αβγγ : g′_{α α⁻ α⁼ α⁼}
+                    g′[time_idx, α, α⁻, α⁼, α⁼] += γ_αα⁻ * γ[α⁼, α⁼] * F_g′
+                end
+            end
+        end
+
+        # ---------------------------------------------------------------------
+        # g″ canonical patterns
+        #   αββα, αββγ, αβγδ
+        # ---------------------------------------------------------------------
+        for α in 1:n_sys
+            for α⁻ in 1:n_sys
+                α⁻ == α && continue
+
+                γ_αα⁻ = γ[α, α⁻]
+
+                # αββα : g″_{α α⁻ α⁻ α}
+                # Use γ_{αα⁻} γ_{α⁻α}, not γ_{αα⁻}^2, so the formula remains
+                # valid even when γ is complex/Hermitian rather than real-symmetric.
+                g″[time_idx, α, α⁻, α⁻, α] += γ_αα⁻ * γ[α⁻, α] * F_g″
+
+                for α⁼ in 1:n_sys
+                    (α⁼ == α || α⁼ == α⁻) && continue
+
+                    # αββγ : g″_{α α⁻ α⁻ α⁼}
+                    g″[time_idx, α, α⁻, α⁻, α⁼] += γ_αα⁻ * γ[α⁻, α⁼] * F_g″
+
+                    for α⁺ in 1:n_sys
+                        (α⁺ == α || α⁺ == α⁻ || α⁺ == α⁼) && continue
+
+                        # αβγδ : g″_{α α⁻ α⁼ α⁺}
+                        g″[time_idx, α, α⁻, α⁼, α⁺] += γ_αα⁻ * γ[α⁼, α⁺] * F_g″
+                    end
+                end
+            end
+        end
+    end
+
+    return nothing
+end
 
 function calc__g_g′_g″!(context::RmrtContext)
     n_sys   = context.system.n_sys
@@ -142,42 +330,29 @@ function calc__g_g′_g″!(context::RmrtContext)
 
     γ_exci  = context.γ_exci
 
-    @inbounds for osc_idx = 1:n_osc
-    
+    zero__g_g′_g″!(g, g′, g″)
+
+    @inbounds for osc_idx in 1:n_osc
         ω       = oscs[osc_idx].freq
         coth    = oscs[osc_idx].coth
 
-        @inbounds for β in 1:n_sys, α in 1:n_sys
+        accumulate__g_g′_g″__one_oscillator!(
+            g, g′, g″,
+            γ_exci,
+            osc_idx,
+            ω,
+            coth,
+            n_sys,
+            n_itr,
+            Δt,
+        )
 
-            γʲ_ααββ         = γ_exci[osc_idx,α,α] * γ_exci[osc_idx,β,β]
-            ω²_γʲ_αβαβ      = γ_exci[osc_idx,α,β] * γ_exci[osc_idx,α,β] * (ω^2)
-            ω_γʲ_αβββ       = γ_exci[osc_idx,α,β] * γ_exci[osc_idx,β,β] * ω
-            ω_γʲ_ααββ       = γ_exci[osc_idx,α,α] * γ_exci[osc_idx,β,β] * ω
-
-            @inbounds for time_idx = 1:n_itr
-                t   = (time_idx - 1) * Δt
-                ωt  = ω * t
-                sin_ωt, cos_ωt = sincos(ωt)
-                
-                g[time_idx,α,α,β,β]         += (γʲ_ααββ      * ((coth * (1.0 - cos_ωt)) + 1.0im*(sin_ωt - ωt)))
-
-                # 같을 때만 따로 처리... 중복되거든.
-                if α == β
-                    g′[time_idx,α,α,α,α]    += ω_γʲ_αβββ    * ((coth * sin_ωt) + 1.0im*(cos_ωt - 1.0))
-                else
-                    g′[time_idx,α,α,β,β]    += ω_γʲ_ααββ    * ((coth * sin_ωt) + 1.0im*(cos_ωt - 1.0))
-                    g′[time_idx,α,β,β,β]    += ω_γʲ_αβββ    * ((coth * sin_ωt) + 1.0im*(cos_ωt - 1.0))
-                    g′[time_idx,β,α,β,β]    += ω_γʲ_αβββ    * ((coth * sin_ωt) + 1.0im*(cos_ωt - 1.0)) 
-                end
-           
-                g″[time_idx,α,β,β,α]    += ω²_γʲ_αβαβ   * ((coth * cos_ωt) - 1.0im*(sin_ωt))
-            end
-        end
-
-        if (osc_idx-1) % 100 == 0
+        if (osc_idx - 1) % 100 == 0
             @printf(stderr, "OSC %6d / %6d\n", osc_idx, n_osc)
         end
     end
+
+    return g, g′, g″
 end
 
 function calc__g_g′_g″_with_threads!(context::RmrtContext)
@@ -194,487 +369,535 @@ function calc__g_g′_g″_with_threads!(context::RmrtContext)
 
     γ_exci  = context.γ_exci
 
-    # thread 경쟁상태 방지 위한, local sum 변수 메모리 많이 잡아먹음. 주의.
+    # Thread 경쟁상태 방지용 local containers.
+    # 모든 canonical field를 채우므로 메모리 사용량이 커진다.
     n_ths = Threads.maxthreadid()
-    g_locals    = [Patternized_g{ComplexF64}(n_sys, n_itr) for _ in 1:n_ths]
+    g_locals    = [Patternized_g{ComplexF64}(n_sys, n_itr)  for _ in 1:n_ths]
     g′_locals   = [Patternized_g′{ComplexF64}(n_sys, n_itr) for _ in 1:n_ths]
     g″_locals   = [Patternized_g″{ComplexF64}(n_sys, n_itr) for _ in 1:n_ths]
-    
-    for tid in 1:n_ths
-        fill!(g_locals[tid].ααββ, 0)
-        
-        fill!(g′_locals[tid].ααββ, 0)
-        fill!(g′_locals[tid].αβαα, 0)
-        fill!(g′_locals[tid].αβββ, 0)
 
-        fill!(g″_locals[tid].αββα, 0)
+    zero__g_g′_g″!(g, g′, g″)
+
+    for tid in 1:n_ths
+        zero__g_g′_g″!(g_locals[tid], g′_locals[tid], g″_locals[tid])
     end
 
-    @inbounds @threads for osc_idx = 1:n_osc
-    
+    @inbounds @threads for osc_idx in 1:n_osc
         ω       = oscs[osc_idx].freq
         coth    = oscs[osc_idx].coth
 
-        # g_local 변수 만들기.
         tid = threadid()
-        g_local     = g_locals[tid]
-        g′_local    = g′_locals[tid]
-        g″_local    = g″_locals[tid]
 
-        @inbounds for β in 1:n_sys, α in 1:n_sys
+        accumulate__g_g′_g″__one_oscillator!(
+            g_locals[tid],
+            g′_locals[tid],
+            g″_locals[tid],
+            γ_exci,
+            osc_idx,
+            ω,
+            coth,
+            n_sys,
+            n_itr,
+            Δt,
+        )
 
-            hr_ααββ         = γ_exci[osc_idx,α,α] * γ_exci[osc_idx,β,β]
-            hr_αβαβ_ω²      = γ_exci[osc_idx,α,β] * γ_exci[osc_idx,α,β] * (ω^2)
-            hr_αβββ_ω       = γ_exci[osc_idx,α,β] * γ_exci[osc_idx,β,β] * ω
-            ω_γʲ_ααββ       = γ_exci[osc_idx,α,α] * γ_exci[osc_idx,β,β] * ω
-
-            @inbounds for time_idx = 1:n_itr
-                t   = (time_idx - 1) * Δt
-                ωt  = ω * t
-
-                sin_ωt, cos_ωt = sin(ωt), cos(ωt)
-                
-                g_local[time_idx,α,α,β,β]    += (hr_ααββ      * ((coth * (1.0 - cos_ωt)) + 1.0im*(sin_ωt - ωt)))
-
-                if α == β
-                    g′_local[time_idx,α,α,α,α]    += hr_αβββ_ω    * ((coth * sin_ωt) + 1.0im*(cos_ωt - 1.0))
-                else
-                    g′_local[time_idx,α,α,β,β]    += ω_γʲ_ααββ    * ((coth * sin_ωt) + 1.0im*(cos_ωt - 1.0))
-                    g′_local[time_idx,α,β,β,β]    += hr_αβββ_ω    * ((coth * sin_ωt) + 1.0im*(cos_ωt - 1.0))
-                    g′_local[time_idx,β,α,β,β]    += hr_αβββ_ω    * ((coth * sin_ωt) + 1.0im*(cos_ωt - 1.0)) 
-                end
-           
-                g″_local[time_idx,α,β,β,α]    += hr_αβαβ_ω²   * ((coth * cos_ωt) - 1.0im*(sin_ωt))
-            end
-        end
-
-        if (osc_idx-1) % 100 == 0
+        if (osc_idx - 1) % 100 == 0
             @printf(stderr, "OSC %6d / %6d\n", osc_idx, n_osc)
         end
     end
-    
 
-    # reduction (single-thread)
-    # fill!(g, 0)
+    # reduction: single-thread
     for tid in 1:n_ths
-        inplace_add!(g, g_locals[tid])
+        inplace_add!(g,  g_locals[tid])
         inplace_add!(g′, g′_locals[tid])
         inplace_add!(g″, g″_locals[tid])
+    end
+
+    return g, g′, g″
+end
+
+
+function calc__σ_σ′!(context::RmrtContext)
+    start_itr = Int(context.curr_itr)
+
+    n_sys    = context.system.n_sys
+    n_itr    = context.simulation_details.num_of_iteration
+    Δt       = context.simulation_details.Δt
+    ϵ        = context.ϵ_exci
+
+    σ        = context.σ
+    σ′       = context.σ′
+    g        = context.g
+    g′       = context.g′
+    g″       = context.g″
+
+    start_itr < n_itr || return @view σ[:, :, n_itr]
+
+    @inline ω(a::Int, b::Int) = ϵ[a] - ϵ[b]
+
+    @inline function ∫weight(s_itr::Int, curr_itr::Int)
+        # trapezoidal rule on [0,t]
+        return (s_itr == 1 || s_itr == curr_itr) ? 0.5 * Δt : Δt
+    end
+
+    @inline function phase(a::Int, b::Int, Δ_itr::Int)
+        Δ = (Δ_itr - 1) * Δt
+        return exp(-1.0im * ω(a, b) * Δ)
+    end
+
+    @inline function gen__exponent_type_1(s_itr::Int, Δ_itr::Int, t_itr::Int,
+                         α⁻::Int, α⁼::Int, β::Int)
+        return (
+            -g[s_itr, α⁼, α⁼, α⁼, α⁼]
+            +g[s_itr, α⁻, α⁻, α⁼, α⁼]
+            +conj(g[s_itr, α⁼, α⁼, β, β])
+            -conj(g[s_itr, α⁻, α⁻, β, β])
+
+            -g[Δ_itr, α⁻, α⁻, α⁻, α⁻]
+            +g[Δ_itr, α⁻, α⁻, α⁼, α⁼]
+            -g[Δ_itr, β, β, α⁼, α⁼]
+            +g[Δ_itr, β, β, α⁻, α⁻]
+
+            +g[t_itr, α⁼, α⁼, α⁼, α⁼]
+            -g[t_itr, α⁻, α⁻, α⁼, α⁼]
+            -conj(g[t_itr, α⁼, α⁼, β, β])
+            +conj(g[t_itr, α⁻, α⁻, β, β])
+        )
+    end
+
+    @inline function gen__exponent_type_2(s_itr::Int, Δ_itr::Int, t_itr::Int,
+                         a::Int, β⁼::Int, β⁻::Int)
+        return (
+            -conj(g[s_itr, β⁼, β⁼, β⁼, β⁼])
+            +conj(g[s_itr, β⁻, β⁻, β⁼, β⁼])
+            +g[s_itr, β⁼, β⁼, a, a]
+            -g[s_itr, β⁻, β⁻, a, a]
+
+            -conj(g[Δ_itr, β⁻, β⁻, β⁻, β⁻])
+            +conj(g[Δ_itr, β⁻, β⁻, β⁼, β⁼])
+            -conj(g[Δ_itr, a, a, β⁼, β⁼])
+            +conj(g[Δ_itr, a, a, β⁻, β⁻])
+
+            +conj(g[t_itr, β⁼, β⁼, β⁼, β⁼])
+            -conj(g[t_itr, β⁻, β⁻, β⁼, β⁼])
+            -g[t_itr, β⁼, β⁼, a, a]
+            +g[t_itr, β⁻, β⁻, a, a]
+        )
+    end
+
+    @inline function gen_coef_block_type_1(
+        s_itr::Int, Δ_itr::Int, t_itr::Int,
+        α::Int, α⁻::Int, α⁼::Int, β::Int)
+
+        left_one_point = (
+             g′[Δ_itr, α, α⁻, α⁼, α⁼]
+            -g′[Δ_itr, α, α⁻, α⁻, α⁻]
+            -g′[t_itr, α, α⁻, α⁼, α⁼]
+            +g′[t_itr, α, α⁻, α⁻, α⁻]
+        )
+
+        right_one_point = (
+            -g′[s_itr, α⁻, α⁼, α⁼, α⁼]
+            +conj(g′[s_itr, α⁼, α⁻, β, β])
+            -g′[Δ_itr, α⁻, α⁻, α⁻, α⁼]
+            +g′[Δ_itr, β, β, α⁻, α⁼]
+        )
+
+        return g″[Δ_itr, α, α⁻, α⁻, α⁼] - left_one_point * right_one_point
+    end
+
+    @inline function gen_coef_block_type_2(
+        s_itr::Int, Δ_itr::Int, t_itr::Int,
+        β::Int, β⁻::Int, β⁼::Int, α::Int)
+
+        left_one_point = (
+            -conj(g′[Δ_itr, β, β⁻, β⁼, β⁼])
+            +conj(g′[Δ_itr, β, β⁻, β⁻, β⁻])
+            +conj(g′[t_itr, β, β⁻, β⁼, β⁼])
+            -conj(g′[t_itr, β, β⁻, β⁻, β⁻])
+        )
+
+        right_one_point = (
+            -g′[s_itr, β⁼, β⁻, α, α]
+            +conj(g′[s_itr, β⁻, β⁼, β⁼, β⁼])
+            -conj(g′[Δ_itr, α, α, β⁻, β⁼])
+            +conj(g′[Δ_itr, β⁻, β⁻, β⁻, β⁼])
+        )
+
+        return conj(g″[Δ_itr, β, β⁻, β⁻, β⁼]) - left_one_point * right_one_point
+    end
+
+    @inline function gen_coef_block_type_3(
+        s_itr::Int, Δ_itr::Int, t_itr::Int,
+        α::Int, β::Int, α⁻::Int, β⁻::Int)
+
+        left_one_point = (
+            -g′[s_itr, α, α⁻, α⁻, α⁻]
+            +conj(g′[s_itr, α⁻, α, β⁻, β⁻])
+            -g′[Δ_itr, α, α, α, α⁻]
+            +g′[Δ_itr, β⁻, β⁻, α, α⁻]
+        )
+
+        right_one_point = (
+            -g′[Δ_itr, β⁻, β, α, α]
+            +g′[Δ_itr, β⁻, β, α⁻, α⁻]
+            +g′[t_itr, β⁻, β, α, α]
+            -g′[t_itr, β⁻, β, α⁻, α⁻]
+        )
+
+        return g″[Δ_itr, β⁻, β, α, α⁻] - left_one_point * right_one_point
+    end
+
+    @inline function gen_coef_block_type_4(
+        s_itr::Int, Δ_itr::Int, t_itr::Int,
+        α::Int, β::Int, α⁻::Int, β⁻::Int)
+
+        left_one_point = (
+            -conj(g′[Δ_itr, α⁻, α, β⁻, β⁻])
+            +conj(g′[Δ_itr, α⁻, α, β, β])
+            +conj(g′[t_itr, α⁻, α, β⁻, β⁻])
+            -conj(g′[t_itr, α⁻, α, β, β])
+        )
+
+        right_one_point = (
+            -g′[s_itr, β⁻, β, α⁻, α⁻]
+            +conj(g′[s_itr, β, β⁻, β⁻, β⁻])
+            -conj(g′[Δ_itr, α⁻, α⁻, β, β⁻])
+            +conj(g′[Δ_itr, β, β, β, β⁻])
+        )
+
+        return conj(g″[Δ_itr, α⁻, α, β, β⁻]) - left_one_point * right_one_point
+    end
+
+    # -------------------------------------------------------------------------
+    # Time propagation loop
+    # -------------------------------------------------------------------------
+    @inbounds for curr_itr in start_itr:(n_itr - 1)
+        σ_t  = @view σ[:, :, curr_itr]
+        σ′_t = @view σ′[:, :, curr_itr]
+
+        fill!(σ′_t, 0.0 + 0.0im)
+
+        # -------------------------------------------------------------------------
+        # Main loop
+        # -------------------------------------------------------------------------
+        @inbounds for β in 1:n_sys, α in 1:n_sys
+            # The present equation is the off-diagonal coherence equation.
+            # Population dynamics should be handled by a separate population closure.
+            # if α == β
+            #     σ′_t[α, β] = 0.0 + 0.0im
+            #     continue
+            # end
+
+            # t-local diagonal/coherence phase block
+            rhs = (
+                -1.0im * ω(α, β)
+                -g′[curr_itr, α, α, α, α] +conj(g′[curr_itr, α, α, β, β])
+                +g′[curr_itr, β, β, α, α] -conj(g′[curr_itr, β, β, β, β])
+            ) * σ_t[α, β]
+
+            # t-local left mixing
+            for α⁻ in 1:n_sys
+                α⁻ == α && continue
+
+                rhs -= σ_t[α⁻, β] * (g′[curr_itr, α, α⁻, α⁻, α⁻] -conj(g′[curr_itr, α⁻, α, β, β]))
+            end
+
+            # t-local right mixing
+            for β⁻ in 1:n_sys
+                β⁻ == β && continue
+                rhs += σ_t[α, β⁻] * (g′[curr_itr, β⁻, β, α, α] -conj(g′[curr_itr, β, β⁻, β⁻, β⁻]))
+            end
+
+            # memory integral
+            if curr_itr > 1
+                integral = 0.0 + 0.0im
+
+                for s_itr in 1:curr_itr
+                    Δ_itr = curr_itr - s_itr + 1
+                    kernel = 0.0 + 0.0im
+
+                    # -------------------------------------------------------------
+                    #   -Σ_{α⁻≠α} Σ_{α⁼≠α⁻} σ_{α⁼β} ...
+                    # -------------------------------------------------------------
+                    for α⁻ in 1:n_sys
+                        α⁻ == α && continue
+                        for α⁼ in 1:n_sys
+                            α⁼ == α⁻ && continue
+
+                            kernel -= (
+                                σ_t[α⁼, β]
+                                * phase(α⁻, α⁼, Δ_itr)
+                                * exp(gen__exponent_type_1(s_itr, Δ_itr, curr_itr, α⁻, α⁼, β))
+                                * gen_coef_block_type_1(s_itr, Δ_itr, curr_itr, α, α⁻, α⁼, β)
+                            )
+                        end
+                    end
+
+                    # -------------------------------------------------------------
+                    #   -Σ_{β⁻≠β} Σ_{β⁼≠β⁻} σ_{αβ⁼} ...
+                    # -------------------------------------------------------------
+                    for β⁻ in 1:n_sys
+                        β⁻ == β && continue
+                        for β⁼ in 1:n_sys
+                            β⁼ == β⁻ && continue
+
+                            kernel -= (
+                                σ_t[α, β⁼]
+                                * phase(β⁼, β⁻, Δ_itr)
+                                * exp(gen__exponent_type_2(s_itr, Δ_itr, curr_itr, α, β⁼, β⁻))
+                                * gen_coef_block_type_2(s_itr, Δ_itr, curr_itr, β, β⁻, β⁼, α)
+                            )
+                        end
+                    end
+
+                    # -------------------------------------------------------------
+                    #   +Σ_{α⁻≠α} Σ_{β⁻≠β} σ_{α⁻β⁻} ...
+                    # -------------------------------------------------------------
+                    for α⁻ in 1:n_sys
+                        α⁻ == α && continue
+                        for β⁻ in 1:n_sys
+                            β⁻ == β && continue
+
+                            kernel += (
+                                σ_t[α⁻, β⁻]
+                                * phase(α, α⁻, Δ_itr)
+                                * exp(gen__exponent_type_1(s_itr, Δ_itr, curr_itr, α, α⁻, β⁻))
+                                * gen_coef_block_type_3(s_itr, Δ_itr, curr_itr, α, β, α⁻, β⁻)
+                            )
+                        end
+                    end
+
+                    # -------------------------------------------------------------
+                    #   +Σ_{α⁻≠α} Σ_{β⁻≠β} σ_{α⁻β⁻} ...
+                    # -------------------------------------------------------------
+                    for α⁻ in 1:n_sys
+                        α⁻ == α && continue
+                        for β⁻ in 1:n_sys
+                            β⁻ == β && continue
+
+                            kernel += (
+                                σ_t[α⁻, β⁻]
+                                * phase(β⁻, β, Δ_itr)
+                                * exp(gen__exponent_type_2(s_itr, Δ_itr, curr_itr, α⁻, β⁻, β))
+                                * gen_coef_block_type_4(s_itr, Δ_itr, curr_itr, α, β, α⁻, β⁻)
+                            )
+                        end
+                    end
+
+                    integral += ∫weight(s_itr, curr_itr) * kernel
+                end
+
+                rhs += integral
+            end
+
+            σ′_t[α, β] = rhs
+        end
+
+
+        @views σ[:, :, curr_itr + 1] .= σ[:, :, curr_itr] .+ Δt .* σ′[:, :, curr_itr]
+        context.curr_itr = UInt64(curr_itr + 1)
+    end
+
+    return @view σ[:, :, Int(context.curr_itr)]
+end
+
+function set__initial_σ!(
+    context::RmrtContext,
+    σ_initial::AbstractMatrix{<:Complex}
+)
+    n_sys = context.system.n_sys
+
+    size(σ_initial, 1) == n_sys || error("σ_initial row size does not match n_sys")
+    size(σ_initial, 2) == n_sys || error("σ_initial column size does not match n_sys")
+
+    context.curr_itr = UInt64(1)
+
+    σ  = context.σ
+    σ′ = context.σ′
+
+    @views σ[:, :, 1]  .= σ_initial
+    @views σ′[:, :, 1] .= 0.0 + 0.0im
+
+    return @view σ[:, :, 1]
+end
+
+# 특정 population을 1로 만들어 initial state로 만듦.
+function set__initial_σ!(
+    context::RmrtContext;
+    init_state::Integer = 1
+)
+    n_sys = context.system.n_sys
+
+    1 <= init_state <= n_sys || error("init_state is out of range")
+
+    context.curr_itr = UInt64(1)
+
+    σ  = context.σ
+    σ′ = context.σ′
+
+    @views σ[:, :, 1]  .= 0.0 + 0.0im
+    @views σ′[:, :, 1] .= 0.0 + 0.0im
+
+    σ[init_state, init_state, 1] = 1.0 + 0.0im
+
+    return @view σ[:, :, 1]
+end
+
+
+
+function save__rmrt_reduced_dynamics!(
+    context::RmrtContext;
+    save_filename::AbstractString = "rmrt.txt",
+    basis::Symbol = :both,
+)
+    n_sys = context.system.n_sys
+    n_itr_total = context.simulation_details.num_of_iteration
+    Δt = context.simulation_details.Δt
+
+    # If the propagation has not reached the final time, save only computed slices.
+    curr_itr = Int(context.curr_itr)
+    n_save = clamp(curr_itr, 1, n_itr_total)
+
+    σ_hist = context.σ
+    σ′_hist = context.σ′
+    U_sys = context.U_sys
+
+    basis in (:exciton, :site, :both) || error("basis must be one of :exciton, :site, or :both")
+
+    open(save_filename, "w") do file_id
+        @printf(file_id, "\n---- RMRT reduced dynamics ----\n")
+        @printf(file_id, "n_sys=%d  n_saved=%d  Δt=% .8e  basis=%s\n", n_sys, n_save, Δt, String(basis))
+
+        if basis == :exciton || basis == :both
+            @printf(file_id, "\n---- Exciton-basis reduced dynamics ----\n")
+            _write__rmrt_basis_dynamics!(file_id, σ_hist, σ′_hist, n_sys, n_save, Δt, :exciton)
+        end
+
+        if basis == :site || basis == :both
+            @printf(file_id, "\n---- Site-basis reduced dynamics ----\n")
+            _write__rmrt_site_basis_dynamics!(file_id, σ_hist, σ′_hist, U_sys, n_sys, n_save, Δt)
+        end
+    end
+
+    @printf(stderr, "RMRT reduced dynamics saved to %s\n", save_filename)
+    return save_filename
+end
+
+@inline function _write__rmrt_basis_dynamics!(
+    file_id::IO,
+    σ_hist::Array{ComplexF64,3},
+    σ′_hist::Array{ComplexF64,3},
+    n_sys::Int,
+    n_save::Int,
+    Δt::Real,
+    basis_name::Symbol,
+)
+    @inbounds for ti in 1:n_save
+        t = (ti - 1) * Δt
+        σ_t = @view σ_hist[:, :, ti]
+        σ′_t = @view σ′_hist[:, :, ti]
+
+        trσ = tr(σ_t)
+        trσ′ = tr(σ′_t)
+
+        @printf(file_id, "\nt=%12.6f  trace=(% .8e,% .8e)  trace_prime=(% .8e,% .8e)\n",
+            t, real(trσ), imag(trσ), real(trσ′), imag(trσ′))
+
+        @printf(file_id, "  populations[%s]:", String(basis_name))
+        for α in 1:n_sys
+            @printf(file_id, "  p%d=% .8e", α, real(σ_t[α, α]))
+        end
+        @printf(file_id, "\n")
+
+        @printf(file_id, "  population_derivatives[%s]:", String(basis_name))
+        for α in 1:n_sys
+            @printf(file_id, "  dp%d=% .8e", α, real(σ′_t[α, α]))
+        end
+        @printf(file_id, "\n")
+
+        if n_sys >= 2
+            @printf(file_id, "  coherences[%s]:\n", String(basis_name))
+            for β in 1:n_sys, α in 1:n_sys
+                α == β && continue
+                c = σ_t[α, β]
+                c′ = σ′_t[α, β]
+                @printf(file_id,
+                    "    σ[%d,%d]=(% .8e,% .8e)  abs=% .8e  phase=% .8e  σprime[%d,%d]=(% .8e,% .8e)\n",
+                    α, β,
+                    real(c), imag(c), abs(c), angle(c),
+                    α, β,
+                    real(c′), imag(c′),
+                )
+            end
+        end
+    end
+end
+
+@inline function _write__rmrt_site_basis_dynamics!(
+    file_id::IO,
+    σ_hist::Array{ComplexF64,3},
+    σ′_hist::Array{ComplexF64,3},
+    U_sys::AbstractMatrix{ComplexF64},
+    n_sys::Int,
+    n_save::Int,
+    Δt::Real,
+)
+    σ_site = Matrix{ComplexF64}(undef, n_sys, n_sys)
+    σ′_site = Matrix{ComplexF64}(undef, n_sys, n_sys)
+
+    @inbounds for ti in 1:n_save
+        t = (ti - 1) * Δt
+        σ_exci = @view σ_hist[:, :, ti]
+        σ′_exci = @view σ′_hist[:, :, ti]
+
+        # σ_site = U σ_exci U†
+        mul!(σ_site, U_sys, σ_exci)
+        σ_site .= σ_site * U_sys'
+
+        mul!(σ′_site, U_sys, σ′_exci)
+        σ′_site .= σ′_site * U_sys'
+
+        trσ = tr(σ_site)
+        trσ′ = tr(σ′_site)
+
+        @printf(file_id, "\nt=%12.6f  trace=(% .8e,% .8e)  trace_prime=(% .8e,% .8e)\n",
+            t, real(trσ), imag(trσ), real(trσ′), imag(trσ′))
+
+        @printf(file_id, "  populations[site]:")
+        for i in 1:n_sys
+            @printf(file_id, "  p%d=% .8e", i, real(σ_site[i, i]))
+        end
+        @printf(file_id, "\n")
+
+        @printf(file_id, "  population_derivatives[site]:")
+        for i in 1:n_sys
+            @printf(file_id, "  dp%d=% .8e", i, real(σ′_site[i, i]))
+        end
+        @printf(file_id, "\n")
+
+        if n_sys >= 2
+            @printf(file_id, "  coherences[site]:\n")
+            for j in 1:n_sys, i in 1:n_sys
+                i == j && continue
+                c = σ_site[i, j]
+                c′ = σ′_site[i, j]
+                @printf(file_id,
+                    "    σ[%d,%d]=(% .8e,% .8e)  abs=% .8e  phase=% .8e  σprime[%d,%d]=(% .8e,% .8e)\n",
+                    i, j,
+                    real(c), imag(c), abs(c), angle(c),
+                    i, j,
+                    real(c′), imag(c′),
+                )
+            end
+        end
     end
 end
 
 calc__exciton_energy!(context::RmrtContext)                             = calc__ϵ_exci!(context)
 calc__line_broadening_functions!(context::RmrtContext)                  = calc__g_g′_g″!(context)
 calc__line_broadening_functions_with_threads!(context::RmrtContext)     = calc__g_g′_g″_with_threads!(context)
+calc__reduced_density_matrix!(context::RmrtContext)                     = calc__σ_σ′!(context)
 
-
-
-
-
-@inline function _coherence_transition_frequency(context::MrtContext, a::Int, b::Int; use_shifted_energy::Bool=false)
-    if use_shifted_energy
-        return context.ϵ_exci_0[a] - context.ϵ_exci_0[b]
-    else
-        return context.ϵ_exci[a] - context.ϵ_exci[b]
-    end
-end
-
-@inline function _coherence_g_generic(context::MrtContext, time_idx::Int, a::Int, b::Int, c::Int, d::Int)
-    γ_exci  = context.γ_exci
-    oscs    = context.environment.effective_oscillators
-    n_osc   = context.environment.num_of_effective_oscillators
-    Δt      = context.simulation_details.Δt
-
-    t = (time_idx - 1) * Δt
-    value = 0.0 + 0.0im
-
-    @inbounds for osc_idx in 1:n_osc
-        ω    = oscs[osc_idx].freq
-        coth = oscs[osc_idx].coth
-        γab  = γ_exci[osc_idx, a, b]
-        γcd  = γ_exci[osc_idx, c, d]
-
-        sin_ωt, cos_ωt = sincos(ω * t)
-        value += γab * γcd * ((coth * (1.0 - cos_ωt)) + 1.0im * (sin_ωt - ω * t))
-    end
-
-    return value
-end
-
-@inline function _coherence_g′_generic(context::MrtContext, time_idx::Int, a::Int, b::Int, c::Int, d::Int)
-    γ_exci  = context.γ_exci
-    oscs    = context.environment.effective_oscillators
-    n_osc   = context.environment.num_of_effective_oscillators
-    Δt      = context.simulation_details.Δt
-
-    t = (time_idx - 1) * Δt
-    value = 0.0 + 0.0im
-
-    @inbounds for osc_idx in 1:n_osc
-        ω    = oscs[osc_idx].freq
-        coth = oscs[osc_idx].coth
-        γab  = γ_exci[osc_idx, a, b]
-        γcd  = γ_exci[osc_idx, c, d]
-
-        sin_ωt, cos_ωt = sincos(ω * t)
-        value += (ω * γab * γcd) * ((coth * sin_ωt) + 1.0im * (cos_ωt - 1.0))
-    end
-
-    return value
-end
-
-@inline function _coherence_g″_generic(context::MrtContext, time_idx::Int, a::Int, b::Int, c::Int, d::Int)
-    γ_exci  = context.γ_exci
-    oscs    = context.environment.effective_oscillators
-    n_osc   = context.environment.num_of_effective_oscillators
-    Δt      = context.simulation_details.Δt
-
-    t = (time_idx - 1) * Δt
-    value = 0.0 + 0.0im
-
-    @inbounds for osc_idx in 1:n_osc
-        ω    = oscs[osc_idx].freq
-        coth = oscs[osc_idx].coth
-        γab  = γ_exci[osc_idx, a, b]
-        γcd  = γ_exci[osc_idx, c, d]
-
-        sin_ωt, cos_ωt = sincos(ω * t)
-        value += ((ω^2) * γab * γcd) * ((coth * cos_ωt) - 1.0im * sin_ωt)
-    end
-
-    return value
-end
-
-"""
-    calc__coherence_rhs!(dotσ, context, σ, time_idx; use_shifted_energy=false)
-
-Compute the uploaded coherence equation for dot sigma_{\alpha\beta}(t) at a
-single discrete time index `time_idx`.
-
-Implementation notes:
-- The six memory-kernel blocks in the uploaded formula are kept explicitly.
-- Generic 4-index g, g′, g″ objects are evaluated on the fly from γ_exci and the
-  effective oscillators, so this routine is not limited by the patternized caches.
-- Only off-diagonal entries are filled. Diagonal entries are left at zero.
-"""
-function calc__coherence_rhs!(
-    dotσ               ::AbstractMatrix{ComplexF64},
-    context             ::RmrtContext,
-    σ                   ::AbstractMatrix{<:Complex},
-    time_idx            ::Int;
-    use_shifted_energy  ::Bool=false,
-)
-    n_sys = context.system.n_sys
-    n_itr = context.simulation_details.num_of_iteration
-    Δt    = context.simulation_details.Δt
-
-    size(dotσ, 1) == n_sys || error("dotσ row size does not match n_sys")
-    size(dotσ, 2) == n_sys || error("dotσ column size does not match n_sys")
-    size(σ, 1) == n_sys    || error("σ row size does not match n_sys")
-    size(σ, 2) == n_sys    || error("σ column size does not match n_sys")
-    1 <= time_idx <= n_itr || error("time_idx is out of range")
-
-    fill!(dotσ, 0.0 + 0.0im)
-
-    g   = (idx, a, b, c, d) -> _coherence_g_generic(context, idx, a, b, c, d)
-    g′  = (idx, a, b, c, d) -> _coherence_g′_generic(context, idx, a, b, c, d)
-    g″  = (idx, a, b, c, d) -> _coherence_g″_generic(context, idx, a, b, c, d)
-
-    @inbounds for β in 1:n_sys, α in 1:n_sys
-        if α == β
-            dotσ[α, β] = 0.0 + 0.0im
-            continue
-        end
-
-        ω_αβ = _coherence_transition_frequency(context, α, β; use_shifted_energy=use_shifted_energy)
-
-        value = (
-            -1.0im * ω_αβ
-            - g′(time_idx, α, α, α, α)
-            + conj(g′(time_idx, α, α, β, β))
-            + g′(time_idx, β, β, α, α)
-            - conj(g′(time_idx, β, β, β, β))
-        ) * σ[α, β]
-
-        for αbar in 1:n_sys
-            αbar == α && continue
-            value -= σ[αbar, β] * (
-                g′(time_idx, α, αbar, αbar, αbar)
-                - conj(g′(time_idx, αbar, α, β, β))
-            )
-        end
-
-        for βbar in 1:n_sys
-            βbar == β && continue
-            value += σ[α, βbar] * (
-                g′(time_idx, βbar, β, α, α)
-                - conj(g′(time_idx, β, βbar, βbar, βbar))
-            )
-        end
-
-        if time_idx > 1
-            integral_sum = 0.0 + 0.0im
-
-            for s_idx in 1:time_idx
-                Δ_idx = time_idx - s_idx + 1
-                Δ     = (Δ_idx - 1) * Δt
-                weight = (s_idx == 1 || s_idx == time_idx) ? 0.5 : 1.0
-
-                kernel_value = 0.0 + 0.0im
-
-                # 1) - sum_{αbar ≠ α} σ_{αβ}(t) ...
-                for αbar in 1:n_sys
-                    αbar == α && continue
-
-                    E1 = (
-                        g(time_idx, α, α, α, α)
-                        - g(s_idx, α, α, α, α)
-                        - g(Δ_idx, αbar, αbar, αbar, αbar)
-                        - (g(time_idx, αbar, αbar, α, α) - g(s_idx, αbar, αbar, α, α) - g(Δ_idx, αbar, αbar, α, α))
-                        - g(Δ_idx, β, β, α, α)
-                        + conj(g(s_idx, α, α, β, β) - g(time_idx, α, α, β, β))
-                        + g(Δ_idx, β, β, αbar, αbar)
-                        + conj(g(time_idx, αbar, αbar, β, β) - g(s_idx, αbar, αbar, β, β))
-                    )
-
-                    A1 = (
-                        -g′(time_idx, α, αbar, α, α)
-                        + g′(Δ_idx, α, αbar, α, α)
-                        - g′(Δ_idx, α, αbar, αbar, αbar)
-                        + g′(time_idx, α, αbar, αbar, αbar)
-                    )
-
-                    B1 = (
-                        -g′(s_idx, αbar, α, α, α)
-                        - g′(Δ_idx, αbar, αbar, αbar, α)
-                        + conj(g′(s_idx, α, αbar, β, β))
-                        + g′(Δ_idx, β, β, αbar, α)
-                    )
-
-                    kernel_value += -σ[α, β] * exp(-1.0im * _coherence_transition_frequency(context, αbar, α; use_shifted_energy=use_shifted_energy) * Δ) * exp(E1) * (g″(Δ_idx, α, αbar, αbar, α) - A1 * B1)
-                end
-
-                # 2) - sum_{βbar ≠ β} σ_{αβ}(t) ...
-                for βbar in 1:n_sys
-                    βbar == β && continue
-
-                    E2 = (
-                        conj(g(time_idx, β, β, β, β) - g(s_idx, β, β, β, β))
-                        - conj(g(Δ_idx, βbar, βbar, βbar, βbar))
-                        - conj(g(time_idx, βbar, βbar, β, β) - g(s_idx, βbar, βbar, β, β) - g(Δ_idx, βbar, βbar, β, β))
-                        - g(Δ_idx, β, β, α, α)
-                        + conj(g(s_idx, α, α, β, β) - g(time_idx, α, α, β, β))
-                        + g(Δ_idx, βbar, βbar, α, α)
-                        + conj(g(time_idx, α, α, βbar, βbar) - g(s_idx, α, α, βbar, βbar))
-                    )
-
-                    A2 = (
-                        conj(g′(time_idx, β, βbar, β, β))
-                        - conj(g′(Δ_idx, β, βbar, β, β))
-                        + conj(g′(Δ_idx, β, βbar, βbar, βbar))
-                        - conj(g′(time_idx, β, βbar, βbar, βbar))
-                    )
-
-                    B2 = (
-                        -g′(s_idx, β, βbar, α, α)
-                        - conj(g′(Δ_idx, α, α, βbar, β))
-                        + conj(g′(s_idx, βbar, β, β, β))
-                        + conj(g′(Δ_idx, βbar, βbar, βbar, β))
-                    )
-
-                    kernel_value += -σ[α, β] * exp(-1.0im * _coherence_transition_frequency(context, β, βbar; use_shifted_energy=use_shifted_energy) * Δ) * exp(E2) * (conj(g″(Δ_idx, β, βbar, βbar, β)) - A2 * B2)
-                end
-
-                # 3) - sum_{αbar ≠ α} sum_{αdbar ≠ αbar, α} σ_{αdbar β}(t) ...
-                for αbar in 1:n_sys
-                    αbar == α && continue
-                    for αdbar in 1:n_sys
-                        (αdbar == αbar || αdbar == α) && continue
-
-                        E3 = (
-                            g(time_idx, αdbar, αdbar, αdbar, αdbar)
-                            - g(s_idx, αdbar, αdbar, αdbar, αdbar)
-                            - g(Δ_idx, αbar, αbar, αbar, αbar)
-                            - (g(time_idx, αbar, αbar, αdbar, αdbar) - g(s_idx, αbar, αbar, αdbar, αdbar) - g(Δ_idx, αbar, αbar, αdbar, αdbar))
-                            - g(Δ_idx, β, β, αdbar, αdbar)
-                            + conj(g(s_idx, αdbar, αdbar, β, β) - g(time_idx, αdbar, αdbar, β, β))
-                            + g(Δ_idx, β, β, αbar, αbar)
-                            + conj(g(time_idx, αbar, αbar, β, β) - g(s_idx, αbar, αbar, β, β))
-                        )
-
-                        A3 = (
-                            -g′(time_idx, α, αbar, αdbar, αdbar)
-                            + g′(Δ_idx, α, αbar, αdbar, αdbar)
-                            - g′(Δ_idx, α, αbar, αbar, αbar)
-                            + g′(time_idx, α, αbar, αbar, αbar)
-                        )
-
-                        B3 = (
-                            -g′(s_idx, αbar, αdbar, αdbar, αdbar)
-                            - g′(Δ_idx, αbar, αbar, αbar, αdbar)
-                            + conj(g′(s_idx, αdbar, αbar, β, β))
-                            + g′(Δ_idx, β, β, αbar, αdbar)
-                        )
-
-                        kernel_value += -σ[αdbar, β] * exp(-1.0im * _coherence_transition_frequency(context, αbar, αdbar; use_shifted_energy=use_shifted_energy) * Δ)  * exp(E3) * (g″(Δ_idx, α, αbar, αbar, αdbar) - A3 * B3)
-                    end
-                end
-
-                # 4) - sum_{βbar ≠ β} sum_{βdbar ≠ βbar, β} σ_{α βdbar}(t) ...
-                for βbar in 1:n_sys
-                    βbar == β && continue
-                    for βdbar in 1:n_sys
-                        (βdbar == βbar || βdbar == β) && continue
-
-                        E4 = (
-                            conj(g(time_idx, βdbar, βdbar, βdbar, βdbar) - g(s_idx, βdbar, βdbar, βdbar, βdbar))
-                            - conj(g(Δ_idx, βbar, βbar, βbar, βbar))
-                            - conj(g(time_idx, βbar, βbar, βdbar, βdbar) - g(s_idx, βbar, βbar, βdbar, βdbar) - g(Δ_idx, βbar, βbar, βdbar, βdbar))
-                            - g(Δ_idx, βdbar, βdbar, α, α)
-                            + conj(g(s_idx, α, α, βdbar, βdbar) - g(time_idx, α, α, βdbar, βdbar))
-                            + g(Δ_idx, βbar, βbar, α, α)
-                            + conj(g(time_idx, α, α, βbar, βbar) - g(s_idx, α, α, βbar, βbar))
-                        )
-
-                        A4 = (
-                            conj(g′(time_idx, β, βbar, βdbar, βdbar))
-                            - conj(g′(Δ_idx, β, βbar, βdbar, βdbar))
-                            + conj(g′(Δ_idx, β, βbar, βbar, βbar))
-                            - conj(g′(time_idx, β, βbar, βbar, βbar))
-                        )
-
-                        B4 = (
-                            -g′(s_idx, βdbar, βbar, α, α)
-                            - conj(g′(Δ_idx, α, α, βbar, βdbar))
-                            + conj(g′(s_idx, βbar, βdbar, βdbar, βdbar))
-                            + conj(g′(Δ_idx, βbar, βbar, βbar, βdbar))
-                        )
-
-                        kernel_value += -σ[α, βdbar] * exp(-1.0im * _coherence_transition_frequency(context, βdbar, βbar; use_shifted_energy=use_shifted_energy) * Δ) * exp(E4) * (conj(g″(Δ_idx, β, βbar, βbar, βdbar)) - A4 * B4)
-                    end
-                end
-
-                # 5) + sum_{αbar ≠ α} sum_{βbar ≠ β} σ_{αbar βbar}(t) e^{-iω_{α αbar}Δ} ...
-                for αbar in 1:n_sys
-                    αbar == α && continue
-                    for βbar in 1:n_sys
-                        βbar == β && continue
-
-                        E5 = (
-                            g(time_idx, αbar, αbar, αbar, αbar)
-                            - g(s_idx, αbar, αbar, αbar, αbar)
-                            - g(Δ_idx, α, α, α, α)
-                            - (g(time_idx, α, α, αbar, αbar) - g(s_idx, α, α, αbar, αbar) - g(Δ_idx, α, α, αbar, αbar))
-                            - g(Δ_idx, βbar, βbar, αbar, αbar)
-                            + conj(g(s_idx, αbar, αbar, βbar, βbar) - g(time_idx, αbar, αbar, βbar, βbar))
-                            + g(Δ_idx, βbar, βbar, α, α)
-                            + conj(g(time_idx, α, α, βbar, βbar) - g(s_idx, α, α, βbar, βbar))
-                        )
-
-                        A5 = (
-                            -g′(s_idx, α, αbar, αbar, αbar)
-                            - g′(Δ_idx, α, α, α, αbar)
-                            + conj(g′(s_idx, αbar, α, βbar, βbar))
-                            + g′(Δ_idx, βbar, βbar, α, αbar)
-                        )
-
-                        B5 = (
-                            g′(time_idx, βbar, β, α, α)
-                            - g′(Δ_idx, βbar, β, α, α)
-                            - g′(time_idx, βbar, β, αbar, αbar)
-                            + g′(Δ_idx, βbar, β, αbar, αbar)
-                        )
-
-                        kernel_value += σ[αbar, βbar] * exp(-1.0im * _coherence_transition_frequency(context, α, αbar; use_shifted_energy=use_shifted_energy) * Δ) * exp(E5) * (g″(Δ_idx, βbar, β, α, αbar) - A5 * B5)
-                    end
-                end
-
-                # 6) + sum_{αbar ≠ α} sum_{βbar ≠ β} σ_{αbar βbar}(t) e^{-iω_{βbar β}Δ} ...
-                for αbar in 1:n_sys
-                    αbar == α && continue
-                    for βbar in 1:n_sys
-                        βbar == β && continue
-
-                        E6 = (
-                            conj(g(time_idx, βbar, βbar, βbar, βbar) - g(s_idx, βbar, βbar, βbar, βbar))
-                            - conj(g(Δ_idx, β, β, β, β))
-                            - conj(g(time_idx, β, β, βbar, βbar) - g(s_idx, β, β, βbar, βbar) - g(Δ_idx, β, β, βbar, βbar))
-                            - g(Δ_idx, βbar, βbar, αbar, αbar)
-                            + conj(g(s_idx, αbar, αbar, βbar, βbar) - g(time_idx, αbar, αbar, βbar, βbar))
-                            + g(Δ_idx, β, β, αbar, αbar)
-                            + conj(g(time_idx, αbar, αbar, β, β) - g(s_idx, αbar, αbar, β, β))
-                        )
-
-                        A6 = (
-                            conj(g′(time_idx, αbar, α, βbar, βbar))
-                            - conj(g′(Δ_idx, αbar, α, βbar, βbar))
-                            - conj(g′(time_idx, αbar, α, β, β))
-                            + conj(g′(Δ_idx, αbar, α, β, β))
-                        )
-
-                        B6 = (
-                            -g′(s_idx, βbar, β, αbar, αbar)
-                            - conj(g′(Δ_idx, αbar, αbar, β, βbar))
-                            + conj(g′(s_idx, β, βbar, βbar, βbar))
-                            + conj(g′(Δ_idx, β, β, β, βbar))
-                        )
-
-                        kernel_value += σ[αbar, βbar] * exp(-1.0im * _coherence_transition_frequency(context, βbar, β; use_shifted_energy=use_shifted_energy) * Δ) * exp(E6) * (conj(g″(Δ_idx, αbar, α, β, βbar)) - A6 * B6)
-                    end
-                end
-
-                integral_sum += weight * kernel_value
-            end
-
-            value += Δt * integral_sum
-        end
-
-        dotσ[α, β] = value
-    end
-
-    return dotσ
-end
-
-function calc__coherence_rhs(
-    context             ::MrtContext,
-    σ                   ::AbstractMatrix{<:Complex},
-    time_idx            ::Int;
-    use_shifted_energy  ::Bool=false,
-)
-    dotσ = zeros(ComplexF64, size(σ, 1), size(σ, 2))
-    calc__coherence_rhs!(dotσ, context, σ, time_idx; use_shifted_energy=use_shifted_energy)
-    return dotσ
-end
-
-function calc__coherence_rhs_history!(
-    dotσ_history        ::Array{ComplexF64,3},
-    context             ::MrtContext,
-    σ_history           ::Array{ComplexF64,3};
-    use_shifted_energy  ::Bool=false,
-)
-    n_sys = context.system.n_sys
-    n_itr = context.simulation_details.num_of_iteration
-
-    size(dotσ_history, 1) == n_sys || error("dotσ_history first dimension does not match n_sys")
-    size(dotσ_history, 2) == n_sys || error("dotσ_history second dimension does not match n_sys")
-    size(dotσ_history, 3) == n_itr || error("dotσ_history third dimension does not match num_of_iteration")
-    size(σ_history, 1) == n_sys    || error("σ_history first dimension does not match n_sys")
-    size(σ_history, 2) == n_sys    || error("σ_history second dimension does not match n_sys")
-    size(σ_history, 3) == n_itr    || error("σ_history third dimension does not match num_of_iteration")
-
-    for time_idx in 1:n_itr
-        calc__coherence_rhs!(
-            @view(dotσ_history[:, :, time_idx]),
-            context,
-            @view(σ_history[:, :, time_idx]),
-            time_idx;
-            use_shifted_energy=use_shifted_energy,
-        )
-    end
-
-    return dotσ_history
-end
-
-export MrtContext, create__mrt_context, calc__Λ!, calc__Γ!, calc__g_g′_and_g″!, calc__g_g′_and_g″_with_threads!, calc__rates!, calc__dissipations!, calc__dissipations_with_threads!, check__physics, calc__coherence_rhs!, calc__coherence_rhs, calc__coherence_rhs_history!
 end 
 
