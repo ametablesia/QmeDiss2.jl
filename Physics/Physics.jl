@@ -13,6 +13,7 @@ export
     SimulationDetails,
     Dissipation,
     DrudeLorentzSpectralDensity,
+    SuperOhmicDebyeSpectralDensity,
     SpectralDensityDecomposeInfo,
     add__spectral_density!
 end

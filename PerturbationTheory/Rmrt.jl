@@ -44,20 +44,41 @@ using ..Physics:
     rule(ααββ, Array{T,3},  zeros(T, n_itr, n_sys, n_sys), (t, a, c), a == b && c == d && a != c)
 end
 
+# @patternized Patternized_g′ (n_sys::Int, n_itr::Int) (t::Int, a::Int, b::Int, c::Int, d::Int) begin
+#     rule(αααα, Matrix{T},   zeros(T, n_itr, n_sys), (t, a), a == b && b == c && c == d)
+#     rule(αααβ, Array{T,3},  zeros(T, n_itr, n_sys, n_sys), (t, a, d), a == b && b == c && a != d)
+#     rule(ααββ, Array{T,3},  zeros(T, n_itr, n_sys, n_sys), (t, a, c), a == b && c == d && a != c)
+#     rule(ααβγ, Array{T,4},  zeros(T, n_itr, n_sys, n_sys, n_sys), (t, a, c, d), a == b && a != c && a != d && c != d)
+#     rule(αβαα, Array{T,3},  zeros(T, n_itr, n_sys, n_sys), (t, a, b), a == c && c == d && a != b)
+#     rule(αβββ, Array{T,3},  zeros(T, n_itr, n_sys, n_sys), (t, a, b), b == c && c == d && a != b)
+#     rule(αβγγ, Array{T,4},  zeros(T, n_itr, n_sys, n_sys, n_sys), (t, a, b, c), c == d && a != b && a != c && b != c)
+# end
+
+# @patternized Patternized_g″ (n_sys::Int, n_itr::Int) (t::Int, a::Int, b::Int, c::Int, d::Int) begin
+#     rule(αββα, Array{T,3},  zeros(T, n_itr, n_sys, n_sys), (t, a, b), a == d && b == c && a != b)
+#     rule(αββγ, Array{T,4},  zeros(T, n_itr, n_sys, n_sys, n_sys), (t, a, b, d), b == c && a != b && a != d && b != d)
+#     rule(αβγδ, Array{T,5},  zeros(T, n_itr, n_sys, n_sys, n_sys, n_sys), (t, a, b, c, d), a != b && a != c && a != d && b != c && b != d && c != d)
+# end
+
 @patternized Patternized_g′ (n_sys::Int, n_itr::Int) (t::Int, a::Int, b::Int, c::Int, d::Int) begin
-    rule(αααα, Matrix{T},   zeros(T, n_itr, n_sys), (t, a), a == b && b == c && c == d)
-    rule(αααβ, Array{T,3},  zeros(T, n_itr, n_sys, n_sys), (t, a, d), a == b && b == c && a != d)
-    rule(ααββ, Array{T,3},  zeros(T, n_itr, n_sys, n_sys), (t, a, c), a == b && c == d && a != c)
-    rule(ααβγ, Array{T,4},  zeros(T, n_itr, n_sys, n_sys, n_sys), (t, a, c, d), a == b && a != c && a != d && c != d)
-    rule(αβαα, Array{T,3},  zeros(T, n_itr, n_sys, n_sys), (t, a, b), a == c && c == d && a != b)
-    rule(αβββ, Array{T,3},  zeros(T, n_itr, n_sys, n_sys), (t, a, b), b == c && c == d && a != b)
-    rule(αβγγ, Array{T,4},  zeros(T, n_itr, n_sys, n_sys, n_sys), (t, a, b, c), c == d && a != b && a != c && b != c)
+    rule(αααα, Matrix{T}, zeros(T, n_itr, n_sys), (t, a), a == b && b == c && c == d)
+    rule(αααβ, Array{T,3}, zeros(T, n_itr, n_sys, n_sys), (t, a, d), a == b && b == c && a != d)
+    rule(ααβα, Array{T,3}, zeros(T, n_itr, n_sys, n_sys), (t, a, c), a == b && a == d && a != c)
+    rule(ααββ, Array{T,3}, zeros(T, n_itr, n_sys, n_sys), (t, a, c), a == b && c == d && a != c)
+    rule(ααβγ, Array{T,4}, zeros(T, n_itr, n_sys, n_sys, n_sys), (t, a, c, d), a == b && a != c && a != d && c != d)
+    rule(αβαα, Array{T,3}, zeros(T, n_itr, n_sys, n_sys), (t, a, b), a == c && c == d && a != b)
+    rule(αβββ, Array{T,3}, zeros(T, n_itr, n_sys, n_sys), (t, a, b), b == c && c == d && a != b)
+    rule(αβγγ, Array{T,4}, zeros(T, n_itr, n_sys, n_sys, n_sys), (t, a, b, c), c == d && a != b && a != c && b != c)
 end
 
 @patternized Patternized_g″ (n_sys::Int, n_itr::Int) (t::Int, a::Int, b::Int, c::Int, d::Int) begin
-    rule(αββα, Array{T,3},  zeros(T, n_itr, n_sys, n_sys), (t, a, b), a == d && b == c && a != b)
-    rule(αββγ, Array{T,4},  zeros(T, n_itr, n_sys, n_sys, n_sys), (t, a, b, d), b == c && a != b && a != d && b != d)
-    rule(αβγδ, Array{T,5},  zeros(T, n_itr, n_sys, n_sys, n_sys, n_sys), (t, a, b, c, d), a != b && a != c && a != d && b != c && b != d && c != d)
+    rule(αββα, Array{T,3}, zeros(T, n_itr, n_sys, n_sys), (t, a, b), a == d && b == c && a != b)
+    rule(αβαβ, Array{T,3}, zeros(T, n_itr, n_sys, n_sys), (t, a, b), a == c && b == d && a != b)
+    rule(αββγ, Array{T,4}, zeros(T, n_itr, n_sys, n_sys, n_sys), (t, a, b, d), b == c && a != b && a != d && b != d)
+    rule(αβαγ, Array{T,4}, zeros(T, n_itr, n_sys, n_sys, n_sys), (t, a, b, d), a == c && a != b && a != d && b != d)
+    rule(αβγα, Array{T,4}, zeros(T, n_itr, n_sys, n_sys, n_sys), (t, a, b, c), a == d && a != b && a != c && b != c)
+    rule(αβγβ, Array{T,4}, zeros(T, n_itr, n_sys, n_sys, n_sys), (t, a, b, c), b == d && a != b && a != c && b != c)
+    rule(αβγδ, Array{T,5}, zeros(T, n_itr, n_sys, n_sys, n_sys, n_sys), (t, a, b, c, d), a != b && a != c && a != d && b != c && b != d && c != d)
 end
 
 mutable struct RmrtContext
@@ -179,30 +200,31 @@ function calc__exciton_basis_and_γ_exci!(context::RmrtContext)
     return context
 end
 
+function zero__g_g′_g″!(g::Patternized_g{T}, g′::Patternized_g′{T}, g″::Patternized_g″{T}) where {T}
+    z = zero(T)
 
-@inline function zero__g_g′_g″!(
-    g  ::Patternized_g{ComplexF64},
-    g′ ::Patternized_g′{ComplexF64},
-    g″ ::Patternized_g″{ComplexF64},
-)
     # g canonical patterns
-    fill!(g.αααα, 0.0 + 0.0im)
-    fill!(g.ααββ, 0.0 + 0.0im)
+    fill!(g.αααα, z)
+    fill!(g.ααββ, z)
 
     # g′ canonical patterns
-    fill!(g′.αααα, 0.0 + 0.0im)
-    fill!(g′.αααβ, 0.0 + 0.0im)
-    fill!(g′.ααββ, 0.0 + 0.0im)
-    fill!(g′.ααβγ, 0.0 + 0.0im)
-    fill!(g′.αβαα, 0.0 + 0.0im)
-    fill!(g′.αβββ, 0.0 + 0.0im)
-    fill!(g′.αβγγ, 0.0 + 0.0im)
+    fill!(g′.αααα, z)
+    fill!(g′.αααβ, z)
+    fill!(g′.ααβα, z)
+    fill!(g′.ααββ, z)
+    fill!(g′.ααβγ, z)
+    fill!(g′.αβαα, z)
+    fill!(g′.αβββ, z)
+    fill!(g′.αβγγ, z)
 
     # g″ canonical patterns
-    fill!(g″.αββα, 0.0 + 0.0im)
-    fill!(g″.αββγ, 0.0 + 0.0im)
-    fill!(g″.αβγδ, 0.0 + 0.0im)
-
+    fill!(g″.αββα, z)
+    fill!(g″.αβαβ, z)
+    fill!(g″.αββγ, z)
+    fill!(g″.αβαγ, z)
+    fill!(g″.αβγα, z)
+    fill!(g″.αβγβ, z)
+    fill!(g″.αβγδ, z)
     return nothing
 end
 
@@ -573,6 +595,9 @@ function calc__σ_σ′!(context::RmrtContext)
     # Time propagation loop
     # -------------------------------------------------------------------------
     @inbounds for curr_itr in start_itr:(n_itr - 1)
+
+        @printf(stderr, "Current iteration: %6d / %6d \n", curr_itr, n_itr)
+
         σ_t  = @view σ[:, :, curr_itr]
         σ′_t = @view σ′[:, :, curr_itr]
 
@@ -702,6 +727,139 @@ function calc__σ_σ′!(context::RmrtContext)
     return @view σ[:, :, Int(context.curr_itr)]
 end
 
+
+function calc__σ_σ′_with_threads!(context::RmrtContext)
+    start_itr = Int(context.curr_itr)
+    n_itr     = context.simulation_details.num_of_iteration
+    n_sys     = context.system.n_sys
+    Δt        = context.simulation_details.Δt
+    ϵ         = context.ϵ_exci
+    σ         = context.σ
+    σ′        = context.σ′
+    g         = context.g
+    g′        = context.g′
+    g″        = context.g″
+    start_itr < n_itr || return @view σ[:, :, n_itr]
+
+    @inline ω(a::Int, b::Int) = ϵ[a] - ϵ[b]
+    @inline ∫weight(s_itr::Int, curr_itr::Int) = (s_itr == 1 || s_itr == curr_itr) ? 0.5 * Δt : Δt
+    @inline function phase(a::Int, b::Int, Δ_itr::Int)
+        Δ = (Δ_itr - 1) * Δt
+        return exp(-1.0im * ω(a, b) * Δ)
+    end
+
+    @inline function gen__exponent_type_1(s_itr::Int, Δ_itr::Int, t_itr::Int, α⁻::Int, α⁼::Int, β::Int)
+        return -g[s_itr, α⁼, α⁼, α⁼, α⁼] + g[s_itr, α⁻, α⁻, α⁼, α⁼] + conj(g[s_itr, α⁼, α⁼, β, β]) - conj(g[s_itr, α⁻, α⁻, β, β]) - g[Δ_itr, α⁻, α⁻, α⁻, α⁻] + g[Δ_itr, α⁻, α⁻, α⁼, α⁼] - g[Δ_itr, β, β, α⁼, α⁼] + g[Δ_itr, β, β, α⁻, α⁻] + g[t_itr, α⁼, α⁼, α⁼, α⁼] - g[t_itr, α⁻, α⁻, α⁼, α⁼] - conj(g[t_itr, α⁼, α⁼, β, β]) + conj(g[t_itr, α⁻, α⁻, β, β])
+    end
+
+    @inline function gen__exponent_type_2(s_itr::Int, Δ_itr::Int, t_itr::Int, a::Int, β⁼::Int, β⁻::Int)
+        return -conj(g[s_itr, β⁼, β⁼, β⁼, β⁼]) + conj(g[s_itr, β⁻, β⁻, β⁼, β⁼]) + g[s_itr, β⁼, β⁼, a, a] - g[s_itr, β⁻, β⁻, a, a] - conj(g[Δ_itr, β⁻, β⁻, β⁻, β⁻]) + conj(g[Δ_itr, β⁻, β⁻, β⁼, β⁼]) - conj(g[Δ_itr, a, a, β⁼, β⁼]) + conj(g[Δ_itr, a, a, β⁻, β⁻]) + conj(g[t_itr, β⁼, β⁼, β⁼, β⁼]) - conj(g[t_itr, β⁻, β⁻, β⁼, β⁼]) - g[t_itr, β⁼, β⁼, a, a] + g[t_itr, β⁻, β⁻, a, a]
+    end
+
+    @inline function gen_coef_block_type_1(s_itr::Int, Δ_itr::Int, t_itr::Int, α::Int, α⁻::Int, α⁼::Int, β::Int)
+        left_one_point = g′[Δ_itr, α, α⁻, α⁼, α⁼] - g′[Δ_itr, α, α⁻, α⁻, α⁻] - g′[t_itr, α, α⁻, α⁼, α⁼] + g′[t_itr, α, α⁻, α⁻, α⁻]
+        right_one_point = -g′[s_itr, α⁻, α⁼, α⁼, α⁼] + conj(g′[s_itr, α⁼, α⁻, β, β]) - g′[Δ_itr, α⁻, α⁻, α⁻, α⁼] + g′[Δ_itr, β, β, α⁻, α⁼]
+        return g″[Δ_itr, α, α⁻, α⁻, α⁼] - left_one_point * right_one_point
+    end
+
+    @inline function gen_coef_block_type_2(s_itr::Int, Δ_itr::Int, t_itr::Int, β::Int, β⁻::Int, β⁼::Int, α::Int)
+        left_one_point = -conj(g′[Δ_itr, β, β⁻, β⁼, β⁼]) + conj(g′[Δ_itr, β, β⁻, β⁻, β⁻]) + conj(g′[t_itr, β, β⁻, β⁼, β⁼]) - conj(g′[t_itr, β, β⁻, β⁻, β⁻])
+        right_one_point = -g′[s_itr, β⁼, β⁻, α, α] + conj(g′[s_itr, β⁻, β⁼, β⁼, β⁼]) - conj(g′[Δ_itr, α, α, β⁻, β⁼]) + conj(g′[Δ_itr, β⁻, β⁻, β⁻, β⁼])
+        return conj(g″[Δ_itr, β, β⁻, β⁻, β⁼]) - left_one_point * right_one_point
+    end
+
+    @inline function gen_coef_block_type_3(s_itr::Int, Δ_itr::Int, t_itr::Int, α::Int, β::Int, α⁻::Int, β⁻::Int)
+        left_one_point = -g′[s_itr, α, α⁻, α⁻, α⁻] + conj(g′[s_itr, α⁻, α, β⁻, β⁻]) - g′[Δ_itr, α, α, α, α⁻] + g′[Δ_itr, β⁻, β⁻, α, α⁻]
+        right_one_point = -g′[Δ_itr, β⁻, β, α, α] + g′[Δ_itr, β⁻, β, α⁻, α⁻] + g′[t_itr, β⁻, β, α, α] - g′[t_itr, β⁻, β, α⁻, α⁻]
+        return g″[Δ_itr, β⁻, β, α, α⁻] - left_one_point * right_one_point
+    end
+
+    @inline function gen_coef_block_type_4(s_itr::Int, Δ_itr::Int, t_itr::Int, α::Int, β::Int, α⁻::Int, β⁻::Int)
+        left_one_point = -conj(g′[Δ_itr, α⁻, α, β⁻, β⁻]) + conj(g′[Δ_itr, α⁻, α, β, β]) + conj(g′[t_itr, α⁻, α, β⁻, β⁻]) - conj(g′[t_itr, α⁻, α, β, β])
+        right_one_point = -g′[s_itr, β⁻, β, α⁻, α⁻] + conj(g′[s_itr, β, β⁻, β⁻, β⁻]) - conj(g′[Δ_itr, α⁻, α⁻, β, β⁻]) + conj(g′[Δ_itr, β, β, β, β⁻])
+        return conj(g″[Δ_itr, α⁻, α, β, β⁻]) - left_one_point * right_one_point
+    end
+
+    @inbounds for curr_itr in start_itr:(n_itr - 1)
+
+        @printf(stderr, "Current iteration: %6d / %6d \n", curr_itr, n_itr)
+
+        σ_t = @view σ[:, :, curr_itr]
+        σ′_t = @view σ′[:, :, curr_itr]
+        fill!(σ′_t, 0.0 + 0.0im)
+
+        Threads.@threads for linear_idx in 1:(n_sys * n_sys)
+            α = (linear_idx - 1) % n_sys + 1
+            β = (linear_idx - 1) ÷ n_sys + 1
+
+            # if α == β
+            #     σ′_t[α, β] = 0.0 + 0.0im
+            #     continue
+            # end
+
+            rhs = (-1.0im * ω(α, β) - g′[curr_itr, α, α, α, α] + conj(g′[curr_itr, α, α, β, β]) + g′[curr_itr, β, β, α, α] - conj(g′[curr_itr, β, β, β, β])) * σ_t[α, β]
+
+            for α⁻ in 1:n_sys
+                α⁻ == α && continue
+                rhs -= σ_t[α⁻, β] * (g′[curr_itr, α, α⁻, α⁻, α⁻] - conj(g′[curr_itr, α⁻, α, β, β]))
+            end
+
+            for β⁻ in 1:n_sys
+                β⁻ == β && continue
+                rhs += σ_t[α, β⁻] * (g′[curr_itr, β⁻, β, α, α] - conj(g′[curr_itr, β, β⁻, β⁻, β⁻]))
+            end
+
+            integral = 0.0 + 0.0im
+
+            for s_itr in 1:curr_itr
+                Δ_itr = curr_itr - s_itr + 1
+                kernel = 0.0 + 0.0im
+
+                for α⁻ in 1:n_sys
+                    α⁻ == α && continue
+                    for α⁼ in 1:n_sys
+                        α⁼ == α⁻ && continue
+                        kernel -= σ_t[α⁼, β] * phase(α⁻, α⁼, Δ_itr) * exp(gen__exponent_type_1(s_itr, Δ_itr, curr_itr, α⁻, α⁼, β)) * gen_coef_block_type_1(s_itr, Δ_itr, curr_itr, α, α⁻, α⁼, β)
+                    end
+                end
+
+                for β⁻ in 1:n_sys
+                    β⁻ == β && continue
+                    for β⁼ in 1:n_sys
+                        β⁼ == β⁻ && continue
+                        kernel -= σ_t[α, β⁼] * phase(β⁼, β⁻, Δ_itr) * exp(gen__exponent_type_2(s_itr, Δ_itr, curr_itr, α, β⁼, β⁻)) * gen_coef_block_type_2(s_itr, Δ_itr, curr_itr, β, β⁻, β⁼, α)
+                    end
+                end
+
+                for α⁻ in 1:n_sys
+                    α⁻ == α && continue
+                    for β⁻ in 1:n_sys
+                        β⁻ == β && continue
+                        kernel += σ_t[α⁻, β⁻] * phase(α, α⁻, Δ_itr) * exp(gen__exponent_type_1(s_itr, Δ_itr, curr_itr, α, α⁻, β⁻)) * gen_coef_block_type_3(s_itr, Δ_itr, curr_itr, α, β, α⁻, β⁻)
+                    end
+                end
+
+                for α⁻ in 1:n_sys
+                    α⁻ == α && continue
+                    for β⁻ in 1:n_sys
+                        β⁻ == β && continue
+                        kernel += σ_t[α⁻, β⁻] * phase(β⁻, β, Δ_itr) * exp(gen__exponent_type_2(s_itr, Δ_itr, curr_itr, α⁻, β⁻, β)) * gen_coef_block_type_4(s_itr, Δ_itr, curr_itr, α, β, α⁻, β⁻)
+                    end
+                end
+
+                integral += ∫weight(s_itr, curr_itr) * kernel
+            end
+
+            σ′_t[α, β] = rhs + integral
+        end
+
+        @views σ[:, :, curr_itr + 1] .= σ[:, :, curr_itr] .+ Δt .* σ′[:, :, curr_itr]
+        context.curr_itr = UInt64(curr_itr + 1)
+    end
+
+    return @view σ[:, :, Int(context.curr_itr)]
+end
+
 function set__initial_σ!(
     context::RmrtContext,
     σ_initial::AbstractMatrix{<:Complex}
@@ -745,43 +903,128 @@ function set__initial_σ!(
 end
 
 
-
-function save__rmrt_reduced_dynamics!(
+function set__initial_σ_site!(
     context::RmrtContext;
-    save_filename::AbstractString = "rmrt.txt",
-    basis::Symbol = :both,
+    init_site::Integer = 1
 )
     n_sys = context.system.n_sys
-    n_itr_total = context.simulation_details.num_of_iteration
-    Δt = context.simulation_details.Δt
+    1 <= init_site <= n_sys || error("init_site is out of range")
 
-    # If the propagation has not reached the final time, save only computed slices.
-    curr_itr = Int(context.curr_itr)
-    n_save = clamp(curr_itr, 1, n_itr_total)
+    context.curr_itr = UInt64(1)
 
-    σ_hist = context.σ
-    σ′_hist = context.σ′
+    σ     = context.σ
+    σ′    = context.σ′
     U_sys = context.U_sys
 
-    basis in (:exciton, :site, :both) || error("basis must be one of :exciton, :site, or :both")
+    @views σ[:, :, 1]  .= 0.0 + 0.0im
+    @views σ′[:, :, 1] .= 0.0 + 0.0im
 
-    open(save_filename, "w") do file_id
-        @printf(file_id, "\n---- RMRT reduced dynamics ----\n")
-        @printf(file_id, "n_sys=%d  n_saved=%d  Δt=% .8e  basis=%s\n", n_sys, n_save, Δt, String(basis))
+    @inbounds for β in 1:n_sys, α in 1:n_sys
+        σ[α, β, 1] = conj(U_sys[init_site, α]) * U_sys[init_site, β]
+    end
 
-        if basis == :exciton || basis == :both
-            @printf(file_id, "\n---- Exciton-basis reduced dynamics ----\n")
-            _write__rmrt_basis_dynamics!(file_id, σ_hist, σ′_hist, n_sys, n_save, Δt, :exciton)
+    return @view σ[:, :, 1]
+end
+
+
+
+@inline function _rmrt__col!(file_id::IO, name::AbstractString)
+    @printf(file_id, " %18s", name)
+end
+
+@inline function _rmrt__val!(file_id::IO, value::Real)
+    @printf(file_id, " %18.8e", value)
+end
+
+@inline function _write__rmrt_upper_tri_header!(
+    file_id::IO,
+    n_sys::Int,
+    basis_name::Symbol;
+    write_derivative::Bool=true,
+)
+    @printf(file_id, "\n---- RMRT reduced dynamics: serialized upper-triangular matrix [%s basis] ----\n", String(basis_name))
+    @printf(file_id, "%14s", "time")
+    _rmrt__col!(file_id, "tr_re")
+    _rmrt__col!(file_id, "tr_im")
+
+    for i in 1:n_sys
+        _rmrt__col!(file_id, "p$(i)")
+    end
+
+    for i in 1:n_sys-1, j in i+1:n_sys
+        _rmrt__col!(file_id, "c$(i)$(j)_re")
+        _rmrt__col!(file_id, "c$(i)$(j)_im")
+        _rmrt__col!(file_id, "c$(i)$(j)_abs")
+        _rmrt__col!(file_id, "c$(i)$(j)_phase")
+    end
+
+    if write_derivative
+        _rmrt__col!(file_id, "trp_re")
+        _rmrt__col!(file_id, "trp_im")
+
+        for i in 1:n_sys
+            _rmrt__col!(file_id, "dp$(i)")
         end
 
-        if basis == :site || basis == :both
-            @printf(file_id, "\n---- Site-basis reduced dynamics ----\n")
-            _write__rmrt_site_basis_dynamics!(file_id, σ_hist, σ′_hist, U_sys, n_sys, n_save, Δt)
+        for i in 1:n_sys-1, j in i+1:n_sys
+            _rmrt__col!(file_id, "cp$(i)$(j)_re")
+            _rmrt__col!(file_id, "cp$(i)$(j)_im")
+            _rmrt__col!(file_id, "cp$(i)$(j)_abs")
+            _rmrt__col!(file_id, "cp$(i)$(j)_phase")
         end
     end
 
-    @printf(stderr, "RMRT reduced dynamics saved to %s\n", save_filename)
-    return save_filename
+    @printf(file_id, "\n")
+    return nothing
+end
+
+@inline function _write__rmrt_upper_tri_row!(
+    file_id::IO,
+    σ_t::AbstractMatrix{ComplexF64},
+    σ′_t::AbstractMatrix{ComplexF64},
+    n_sys::Int,
+    t::Real;
+    write_derivative::Bool=true,
+)
+    trσ = tr(σ_t)
+
+    @printf(file_id, "%14.6f", t)
+    _rmrt__val!(file_id, real(trσ))
+    _rmrt__val!(file_id, imag(trσ))
+
+    @inbounds for i in 1:n_sys
+        _rmrt__val!(file_id, real(σ_t[i, i]))
+    end
+
+    @inbounds for i in 1:n_sys-1, j in i+1:n_sys
+        c = σ_t[i, j]
+        _rmrt__val!(file_id, real(c))
+        _rmrt__val!(file_id, imag(c))
+        _rmrt__val!(file_id, abs(c))
+        _rmrt__val!(file_id, angle(c))
+    end
+
+    if write_derivative
+        trσ′ = tr(σ′_t)
+
+        _rmrt__val!(file_id, real(trσ′))
+        _rmrt__val!(file_id, imag(trσ′))
+
+        @inbounds for i in 1:n_sys
+            _rmrt__val!(file_id, real(σ′_t[i, i]))
+        end
+
+        @inbounds for i in 1:n_sys-1, j in i+1:n_sys
+            c′ = σ′_t[i, j]
+            _rmrt__val!(file_id, real(c′))
+            _rmrt__val!(file_id, imag(c′))
+            _rmrt__val!(file_id, abs(c′))
+            _rmrt__val!(file_id, angle(c′))
+        end
+    end
+
+    @printf(file_id, "\n")
+    return nothing
 end
 
 @inline function _write__rmrt_basis_dynamics!(
@@ -791,47 +1034,32 @@ end
     n_sys::Int,
     n_save::Int,
     Δt::Real,
-    basis_name::Symbol,
+    basis_name::Symbol;
+    write_derivative::Bool=true,
 )
+    _write__rmrt_upper_tri_header!(
+        file_id,
+        n_sys,
+        basis_name;
+        write_derivative=write_derivative,
+    )
+
     @inbounds for ti in 1:n_save
         t = (ti - 1) * Δt
         σ_t = @view σ_hist[:, :, ti]
         σ′_t = @view σ′_hist[:, :, ti]
 
-        trσ = tr(σ_t)
-        trσ′ = tr(σ′_t)
-
-        @printf(file_id, "\nt=%12.6f  trace=(% .8e,% .8e)  trace_prime=(% .8e,% .8e)\n",
-            t, real(trσ), imag(trσ), real(trσ′), imag(trσ′))
-
-        @printf(file_id, "  populations[%s]:", String(basis_name))
-        for α in 1:n_sys
-            @printf(file_id, "  p%d=% .8e", α, real(σ_t[α, α]))
-        end
-        @printf(file_id, "\n")
-
-        @printf(file_id, "  population_derivatives[%s]:", String(basis_name))
-        for α in 1:n_sys
-            @printf(file_id, "  dp%d=% .8e", α, real(σ′_t[α, α]))
-        end
-        @printf(file_id, "\n")
-
-        if n_sys >= 2
-            @printf(file_id, "  coherences[%s]:\n", String(basis_name))
-            for β in 1:n_sys, α in 1:n_sys
-                α == β && continue
-                c = σ_t[α, β]
-                c′ = σ′_t[α, β]
-                @printf(file_id,
-                    "    σ[%d,%d]=(% .8e,% .8e)  abs=% .8e  phase=% .8e  σprime[%d,%d]=(% .8e,% .8e)\n",
-                    α, β,
-                    real(c), imag(c), abs(c), angle(c),
-                    α, β,
-                    real(c′), imag(c′),
-                )
-            end
-        end
+        _write__rmrt_upper_tri_row!(
+            file_id,
+            σ_t,
+            σ′_t,
+            n_sys,
+            t;
+            write_derivative=write_derivative,
+        )
     end
+
+    return nothing
 end
 
 @inline function _write__rmrt_site_basis_dynamics!(
@@ -841,57 +1069,117 @@ end
     U_sys::AbstractMatrix{ComplexF64},
     n_sys::Int,
     n_save::Int,
-    Δt::Real,
+    Δt::Real;
+    write_derivative::Bool=true,
 )
-    σ_site = Matrix{ComplexF64}(undef, n_sys, n_sys)
+    σ_tmp   = Matrix{ComplexF64}(undef, n_sys, n_sys)
+    σ_site  = Matrix{ComplexF64}(undef, n_sys, n_sys)
+    σ′_tmp  = Matrix{ComplexF64}(undef, n_sys, n_sys)
     σ′_site = Matrix{ComplexF64}(undef, n_sys, n_sys)
+
+    _write__rmrt_upper_tri_header!(
+        file_id,
+        n_sys,
+        :site;
+        write_derivative=write_derivative,
+    )
 
     @inbounds for ti in 1:n_save
         t = (ti - 1) * Δt
         σ_exci = @view σ_hist[:, :, ti]
         σ′_exci = @view σ′_hist[:, :, ti]
 
-        # σ_site = U σ_exci U†
-        mul!(σ_site, U_sys, σ_exci)
-        σ_site .= σ_site * U_sys'
+        mul!(σ_tmp, U_sys, σ_exci)
+        mul!(σ_site, σ_tmp, U_sys')
 
-        mul!(σ′_site, U_sys, σ′_exci)
-        σ′_site .= σ′_site * U_sys'
+        mul!(σ′_tmp, U_sys, σ′_exci)
+        mul!(σ′_site, σ′_tmp, U_sys')
 
-        trσ = tr(σ_site)
-        trσ′ = tr(σ′_site)
+        _write__rmrt_upper_tri_row!(
+            file_id,
+            σ_site,
+            σ′_site,
+            n_sys,
+            t;
+            write_derivative=write_derivative,
+        )
+    end
 
-        @printf(file_id, "\nt=%12.6f  trace=(% .8e,% .8e)  trace_prime=(% .8e,% .8e)\n",
-            t, real(trσ), imag(trσ), real(trσ′), imag(trσ′))
+    return nothing
+end
 
-        @printf(file_id, "  populations[site]:")
-        for i in 1:n_sys
-            @printf(file_id, "  p%d=% .8e", i, real(σ_site[i, i]))
-        end
-        @printf(file_id, "\n")
+function save__rmrt_reduced_dynamics_serialized!(
+    context::RmrtContext;
+    save_filename::AbstractString="rmrt.txt",
+    basis::Symbol=:both,
+    write_derivative::Bool=true,
+    n_save::Integer=Int(context.curr_itr),
+)
+    n_sys = context.system.n_sys
+    n_itr = context.simulation_details.num_of_iteration
+    Δt    = context.simulation_details.Δt
+    σ     = context.σ
+    σ′    = context.σ′
+    U_sys = context.U_sys
 
-        @printf(file_id, "  population_derivatives[site]:")
-        for i in 1:n_sys
-            @printf(file_id, "  dp%d=% .8e", i, real(σ′_site[i, i]))
-        end
-        @printf(file_id, "\n")
+    n_save_eff = min(Int(n_save), n_itr, size(σ, 3), size(σ′, 3))
 
-        if n_sys >= 2
-            @printf(file_id, "  coherences[site]:\n")
-            for j in 1:n_sys, i in 1:n_sys
-                i == j && continue
-                c = σ_site[i, j]
-                c′ = σ′_site[i, j]
-                @printf(file_id,
-                    "    σ[%d,%d]=(% .8e,% .8e)  abs=% .8e  phase=% .8e  σprime[%d,%d]=(% .8e,% .8e)\n",
-                    i, j,
-                    real(c), imag(c), abs(c), angle(c),
-                    i, j,
-                    real(c′), imag(c′),
-                )
-            end
+    open(save_filename, "w") do file_id
+        @printf(file_id, "# RMRT reduced dynamics serialized by upper-triangular density-matrix entries\n")
+        @printf(file_id, "# diagonal entries: p_i = real(σ[i,i])\n")
+        @printf(file_id, "# off-diagonal entries for i<j: c_ij = σ[i,j], with real, imag, abs, phase\n")
+        @printf(file_id, "# derivative columns use prefix p -> prime: trp, dp, cp\n")
+
+        if basis == :exciton
+            _write__rmrt_basis_dynamics!(
+                file_id,
+                σ,
+                σ′,
+                n_sys,
+                n_save_eff,
+                Δt,
+                :exciton;
+                write_derivative=write_derivative,
+            )
+        elseif basis == :site
+            _write__rmrt_site_basis_dynamics!(
+                file_id,
+                σ,
+                σ′,
+                U_sys,
+                n_sys,
+                n_save_eff,
+                Δt;
+                write_derivative=write_derivative,
+            )
+        elseif basis == :both
+            _write__rmrt_basis_dynamics!(
+                file_id,
+                σ,
+                σ′,
+                n_sys,
+                n_save_eff,
+                Δt,
+                :exciton;
+                write_derivative=write_derivative,
+            )
+
+            _write__rmrt_site_basis_dynamics!(
+                file_id,
+                σ,
+                σ′,
+                U_sys,
+                n_sys,
+                n_save_eff,
+                Δt;
+                write_derivative=write_derivative,
+            )
+        else
+            error("save__rmrt_reduced_dynamics_serialized!: basis must be :exciton, :site, or :both")
         end
     end
+
+    return save_filename
 end
 
 calc__exciton_energy!(context::RmrtContext)                             = calc__ϵ_exci!(context)

@@ -323,20 +323,24 @@ function test__rmrt()
         ),
         env,
         SimulationDetails(
+            0.01,
             0.1,
-            0.1,
-            5000.0,
-            Int64(5000.0 / 0.1)
+            35.0,
+            Int64(35.0 / 0.01)
         )
     )
 
+    
     # 1. Exciton basis 계산
+    @printf(stderr, "1. exicton basis 계산 \n")
     Rmrt.calc__exciton_energy!(rmrt_ctx)
 
     # 2. site-basis coupling을 exciton-basis coupling으로 변환
+    @printf(stderr, "2. site-basis coupling을 exciton-basis coupling으로 변환 \n")
     Rmrt.calc__exciton_basis_and_γ_exci!(rmrt_ctx)
 
     # 3. g, g′, g″ 계산
+    @printf(stderr, "3. g, g′, g″ 계산 \n")
     if Threads.nthreads() == 1
         Rmrt.calc__g_g′_g″!(rmrt_ctx)
     else
@@ -344,15 +348,23 @@ function test__rmrt()
     end
 
     # 4. 초기 density matrix
-    Rmrt.set__initial_σ!(rmrt_ctx; init_state = 1)
+    @printf(stderr, "4. 초기 density matrix \n")
+    Rmrt.set__initial_σ_site!(rmrt_ctx; init_site = 1)
 
     # 5. 전체 σ, σ′ time propagation
-    Rmrt.calc__σ_σ′!(rmrt_ctx)
+    @printf(stderr, "5. 전체 σ, σ′ time propagation \n")
+    if Threads.nthreads() == 1
+        Rmrt.calc__σ_σ′!(rmrt_ctx)
+    else
+        Rmrt.calc__σ_σ′_with_threads!(rmrt_ctx)
+    end
+        
 
-    Rmrt.save__rmrt_reduced_dynamics!(
+    Rmrt.save__rmrt_reduced_dynamics_serialized!(
         rmrt_ctx;
         save_filename = "rmrt.txt",
         basis = :both,
+        write_derivative = true,
     )
 
     return rmrt_ctx
@@ -514,4 +526,4 @@ BenchmarkTools.DEFAULT_PARAMETERS.samples = 10
 # test__mrt()
 # test__cmrt()
 # test__coherence_mrt()
-text__rmrt()
+test__rmrt()
