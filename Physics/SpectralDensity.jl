@@ -27,7 +27,7 @@ mutable struct OhmicTypeSpectralDensity <: SpectralDensity
 end
 
 mutable struct SuperOhmicDebyeSpectralDensity <: SpectralDensity 
-    γ   ::Float64   # exciton-phonon soupling strength
+    γ   ::Float64   # exciton-phonon coupling strength
     ω_c ::Float64   # cutoff freq
 end
 
@@ -38,6 +38,13 @@ end
     
     return (2.0*λ / π) * (ω*γ) / (ω^2 + γ^2)
 end
+
+# @inline function J(info::DrudeLorentzSpectralDensity, ω)
+#     λ = info.λ
+#     γ = info.γ
+    
+#     return (2.0*λ ) * (ω*γ) / (ω^2 + γ^2)
+# end
 
 @inline function J(info::BrownianSpectralDensity, ω)
     λ   = info.λ  
